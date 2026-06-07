@@ -10,6 +10,8 @@ import {
   fmtTime,
   timeAgo,
   scoreColor,
+  explorerAddr,
+  explorerTx,
   CAPABILITIES,
 } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -284,8 +286,13 @@ function QueryDetail({
           {query.winner_address && (
             <div className="detail-section">
               <div className="section-label">Winner</div>
-              <div className="mono" style={{ fontSize: 12, color: "var(--green)" }}>
-                {query.winner_address}
+              <div className="mono" style={{ fontSize: 12, color: "var(--green)", display: "flex", alignItems: "center", gap: 8 }}>
+                {explorerAddr(query.winner_address) ? (
+                  <a href={explorerAddr(query.winner_address)!} target="_blank" rel="noopener noreferrer"
+                    style={{ color: "var(--green)", textDecoration: "none", borderBottom: "1px dashed var(--green)" }}>
+                    {query.winner_address} ↗
+                  </a>
+                ) : query.winner_address}
               </div>
             </div>
           )}
@@ -362,10 +369,17 @@ function QueryDetail({
                   <span className="meta-val">{query.memory_hash.slice(0, 20)}…</span>
                 </>
               )}
-              {query.tx_hash && (
+              {query.tx_hash && !/^0x0+$/.test(query.tx_hash) && (
                 <>
-                  <span className="meta-key">Tx hash</span>
-                  <span className="meta-val">{query.tx_hash.slice(0, 20)}…</span>
+                  <span className="meta-key">Settlement Tx</span>
+                  <span className="meta-val">
+                    {explorerTx(query.tx_hash) ? (
+                      <a href={explorerTx(query.tx_hash)!} target="_blank" rel="noopener noreferrer"
+                        style={{ color: "var(--green)", textDecoration: "none", fontFamily: "monospace" }}>
+                        {query.tx_hash.slice(0, 14)}… ↗
+                      </a>
+                    ) : `${query.tx_hash.slice(0, 14)}…`}
+                  </span>
                 </>
               )}
             </div>

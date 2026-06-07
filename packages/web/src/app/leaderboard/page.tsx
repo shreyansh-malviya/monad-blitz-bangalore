@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type LeaderboardAgent, shortAddr, TIER_LABEL } from "@/lib/api";
+import { api, type LeaderboardAgent, shortAddr, TIER_LABEL, explorerAddr } from "@/lib/api";
 
 type SortKey = "rank" | "reputation" | "wins" | "win_rate" | "losses";
 type SortDir = "asc" | "desc";
@@ -258,12 +258,21 @@ export default function LeaderboardPage() {
                     <td>
                       <div>
                         <div style={{ fontWeight: 500, fontSize: 13 }}>{a.name}</div>
-                        <div
-                          className="mono"
-                          style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}
-                        >
-                          {shortAddr(a.address)}
-                        </div>
+                        {explorerAddr(a.address) ? (
+                          <a
+                            href={explorerAddr(a.address)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mono"
+                            style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1, textDecoration: "none", borderBottom: "1px dashed var(--border-strong)" }}
+                          >
+                            {shortAddr(a.address)} ↗
+                          </a>
+                        ) : (
+                          <div className="mono" style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>
+                            {shortAddr(a.address)}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td>

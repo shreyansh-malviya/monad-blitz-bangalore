@@ -12,6 +12,8 @@ import {
   shortId,
   fmtTime,
   timeAgo,
+  explorerAddr,
+  explorerTx,
 } from "@/lib/api";
 
 const BASE =
@@ -479,6 +481,17 @@ function FinalReport({ proposal }: { proposal: Proposal }) {
 }
 
 // ── Chain info panel ─────────────────────────────────────────────────────────
+function ExplorerLink({ href, label, color = "var(--text-2)" }: { href: string | null; label: string; color?: string }) {
+  if (!href) return <code style={{ fontSize: "10px", color, fontFamily: "monospace" }}>{label}</code>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      style={{ fontSize: "10px", color, fontFamily: "monospace", textDecoration: "none", borderBottom: "1px dashed currentColor" }}
+    >
+      {label} ↗
+    </a>
+  );
+}
+
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -577,22 +590,16 @@ function ChainInfo({ proposal }: { proposal: Proposal }) {
         {/* ProposalEscrow contract */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontSize: "10px", color: "var(--text-3)", width: 120, flexShrink: 0 }}>Contract</span>
-          <code style={{ fontSize: "10px", color: "var(--text-2)", fontFamily: "monospace" }}>
-            {PROPOSAL_ESCROW.slice(0, 10)}…{PROPOSAL_ESCROW.slice(-8)}
-          </code>
+          <ExplorerLink href={explorerAddr(PROPOSAL_ESCROW)} label={`${PROPOSAL_ESCROW.slice(0, 10)}…${PROPOSAL_ESCROW.slice(-8)}`} color="var(--text-2)" />
           <CopyBtn text={PROPOSAL_ESCROW} />
-          <span style={{ fontSize: "9px", color: "var(--text-3)", marginLeft: 4 }}>devnet · no explorer</span>
         </div>
 
         {/* Settlement tx hash — hide if null or all-zero placeholder */}
         {proposal.tx_hash && !/^0x0+$/.test(proposal.tx_hash) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: "10px", color: "var(--text-3)", width: 120, flexShrink: 0 }}>Settlement Tx</span>
-            <code style={{ fontSize: "10px", color: "var(--green)", fontFamily: "monospace" }}>
-              {proposal.tx_hash.slice(0, 10)}…{proposal.tx_hash.slice(-8)}
-            </code>
+            <ExplorerLink href={explorerTx(proposal.tx_hash)} label={`${proposal.tx_hash.slice(0, 10)}…${proposal.tx_hash.slice(-8)}`} color="var(--green)" />
             <CopyBtn text={proposal.tx_hash} />
-            <span style={{ fontSize: "9px", color: "var(--text-3)", marginLeft: 4 }}>devnet · no explorer</span>
           </div>
         )}
       </div>

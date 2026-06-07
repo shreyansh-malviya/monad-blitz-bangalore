@@ -152,6 +152,20 @@ export const api = {
     ),
 };
 
+// ── Explorer links ────────────────────────────────────────────────────────────
+const EXPLORER_BASE =
+  process.env.NEXT_PUBLIC_EXPLORER_URL || "https://testnet.monadexplorer.com";
+
+export function explorerTx(hash: string | null | undefined): string | null {
+  if (!hash || /^0x0+$/.test(hash)) return null;
+  return `${EXPLORER_BASE}/tx/${hash}`;
+}
+
+export function explorerAddr(address: string | null | undefined): string | null {
+  if (!address || address === "0x0000000000000000000000000000000000000000") return null;
+  return `${EXPLORER_BASE}/address/${address}`;
+}
+
 // Helpers
 export function shortAddr(addr: string, chars = 4): string {
   if (!addr || addr.length < 10) return addr ?? "—";
