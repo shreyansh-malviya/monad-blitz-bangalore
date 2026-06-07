@@ -1,4 +1,7 @@
-const BASE = process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || "http://localhost:8000";
+const BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_ORCHESTRATOR_URL ||
+  "http://localhost:8000";
 
 export interface Query {
   id: string;
@@ -6,9 +9,10 @@ export interface Query {
   status: string;
   reward: string;
   current_round: number;
-  response_count: number;
+  response_count?: number;
   winner_address?: string;
   created_at: string;
+  capabilities?: string[];
 }
 
 export interface Agent {
@@ -20,6 +24,7 @@ export interface Agent {
   is_active: boolean;
   total_responses: number;
   win_rate: number;
+  total_earned?: number;
 }
 
 export interface TaskMemory {
@@ -41,26 +46,31 @@ export interface TaskMemory {
 async function fetchAPI<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
+    cache: "no-store",
     ...opts,
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
   return res.json() as Promise<T>;
 }
 
 export const api = {
-  getQueries: (params?: { status?: string; limit?: number }) => {
+  getQueries: (params?: { status?: string; limit?: number; capability?: string }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.capability) qs.set("capability", params.capability);
     return fetchAPI<Query[]>(`/api/queries${qs.toString() ? "?" + qs : ""}`);
   },
 
   getQuery: (id: string) => fetchAPI<Query>(`/api/queries/${id}`),
 
-  createQuery: (problem: string, reward: string) =>
+  createQuery: (problem: string, reward: string, capabilities?: string[]) =>
     fetchAPI<Query>("/api/queries", {
       method: "POST",
-      body: JSON.stringify({ problem, reward }),
+      body: JSON.stringify({ problem, reward, capabilities }),
     }),
 
   getMemory: (queryId: string) =>
@@ -69,4 +79,6 @@ export const api = {
   getAgents: () => fetchAPI<Agent[]>("/api/agents/"),
 
   getLeaderboard: () => fetchAPI<Agent[]>("/api/agents/leaderboard"),
+
+  getAgent: (address: string) => fetchAPI<Agent>(`/api/agents/${address}`),
 };

@@ -407,8 +407,8 @@ export default function ExplorePage() {
     try {
       const data = await api.getQueries({ limit: 50 });
       const incoming = new Set(data.map((q: Query) => q.id));
-      const fresh = new Set([...incoming].filter((id) => !prevIds.current.has(id)));
-      if (fresh.size > 0) setNewIds(fresh);
+      const freshArr = data.map((q: Query) => q.id).filter((id: string) => !prevIds.current.has(id));
+      if (freshArr.length > 0) setNewIds(new Set(freshArr));
       prevIds.current = incoming;
       setQueries(data);
       setTimeout(() => setNewIds(new Set()), 3000);

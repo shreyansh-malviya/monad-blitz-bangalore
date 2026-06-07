@@ -1,105 +1,57 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Trophy, TrendingUp, Zap, Shield } from "lucide-react";
+import { Trophy, TrendingUp, Zap, Shield, Cpu, ChevronUp, ChevronDown } from "lucide-react";
 import { api, Agent } from "@/lib/api";
 
-const TIER_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
-  alpha: { color: "text-yellow-400", icon: "α", label: "Alpha" },
-  beta: { color: "text-blue-400", icon: "β", label: "Beta" },
-  gamma: { color: "text-gray-400", icon: "γ", label: "Gamma" },
+const TIER_CONFIG: Record<string, { color: string; bg: string; border: string; glyph: string; label: string }> = {
+  alpha: { color: '#eab308', bg: 'rgba(234,179,8,0.12)', border: 'rgba(234,179,8,0.3)', glyph: 'α', label: 'Alpha' },
+  beta: { color: '#818cf8', bg: 'rgba(129,140,248,0.12)', border: 'rgba(129,140,248,0.3)', glyph: 'β', label: 'Beta' },
+  gamma: { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.25)', glyph: 'γ', label: 'Gamma' },
 };
 
-function ReputationBar({ score }: { score: number }) {
-  const pct = Math.min(100, (score / 10000) * 100);
-  const color = pct > 60 ? "bg-green-500" : pct > 40 ? "bg-yellow-500" : "bg-red-500";
+const RANK_CONFIG = [
+  { medal: '🥇', glow: 'rgba(234,179,8,0.25)', border: 'rgba(234,179,8,0.3)', color: '#eab308' },
+  { medal: '🥈', glow: 'rgba(148,163,184,0.2)', border: 'rgba(148,163,184,0.25)', color: '#94a3b8' },
+  { medal: '🥉', glow: 'rgba(180,120,80,0.2)', border: 'rgba(180,120,80,0.25)', color: '#cd7f32' },
+];
+
+const ALL_CAPS = ['coding', 'math', 'research', 'analysis', 'writing', 'blockchain', 'general'];
+
+function fmtAddr(a: string) {
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+function ReputationBar({ score, maxScore }: { score: number; maxScore: number }) {
+  const pct = maxScore > 0 ? Math.min(100, (score / maxScore) * 100) : 0;
+  const color = pct > 60 ? '#10b981' : pct > 35 ? '#eab308' : '#6366f1';
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 bg-monad-dark rounded-full h-1.5">
-        <div className={`${color} h-1.5 rounded-full transition-all`} style={{ width: `${pct}%` }} />
+      <div className="flex-1 rounded-full overflow-hidden" style={{ background: 'rgba(99,102,241,0.08)', height: 6 }}>
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{
+            width: `${pct}%`,
+            background: `linear-gradient(90deg, ${color}, ${color}cc)`,
+            boxShadow: `0 0 8px ${color}60`,
+          }}
+        />
       </div>
-      <span className="text-xs font-mono text-gray-400 w-12 text-right">{score.toLocaleString()}</span>
+      <span className="text-xs font-mono w-16 text-right" style={{ color: '#64748b' }}>
+        {score.toLocaleString()}
+      </span>
     </div>
   );
 }
 
-function AgentRow({
-  agent,
-  rank,
-}: {
-  agent: Agent;
-  rank: number;
-}) {
-  const tier = TIER_CONFIG[agent.tier] ?? { color: "text-gray-400", icon: "?", label: agent.tier };
-  const isTop3 = rank <= 3;
-  const rankColors = ["text-yellow-400", "text-gray-400", "text-amber-600"];
-
-  return (
-    <tr
-      className={`border-b border-monad-border hover:bg-monad-dark/40 transition-colors ${
-        isTop3 ? "bg-monad-purple/5" : ""
-      }`}
-    >
-      <td className="px-6 py-4 w-16">
-        <span className={`font-bold text-lg ${isTop3 ? rankColors[rank - 1] : "text-gray-500"}`}>
-          {rank <= 3 ? ["🥇", "🥈", "🥉"][rank - 1] : rank}
-        </span>
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-monad-dark border border-monad-border flex items-center justify-center text-lg font-bold">
-            <span className={tier.color}>{tier.icon}</span>
-          </div>
-          <div>
-            <div className="font-semibold text-white">
-              {agent.name || `${tier.label} Agent`}
-            </div>
-            <div className="text-xs font-mono text-gray-500">
-              {agent.address.slice(0, 10)}…{agent.address.slice(-8)}
-            </div>
-          </div>
-        </div>
-      </td>
-      <td className="px-6 py-4">
-        <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${tier.color} bg-monad-dark border border-monad-border`}
-        >
-          <span>{tier.icon}</span> {tier.label}
-        </span>
-      </td>
-      <td className="px-6 py-4 w-48">
-        <ReputationBar score={agent.reputation_score} />
-      </td>
-      <td className="px-6 py-4 text-center font-mono text-sm text-white">
-        {agent.total_responses ?? 0}
-      </td>
-      <td className="px-6 py-4 text-center font-mono text-sm">
-        <span className={agent.win_rate > 0.5 ? "text-green-400" : "text-gray-400"}>
-          {((agent.win_rate ?? 0) * 100).toFixed(1)}%
-        </span>
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex flex-wrap gap-1">
-          {(agent.capabilities ?? []).slice(0, 3).map((c) => (
-            <span
-              key={c}
-              className="px-1.5 py-0.5 bg-monad-dark border border-monad-border rounded text-xs text-gray-400"
-            >
-              {c}
-            </span>
-          ))}
-          {(agent.capabilities ?? []).length > 3 && (
-            <span className="text-xs text-gray-500">+{agent.capabilities.length - 3}</span>
-          )}
-        </div>
-      </td>
-    </tr>
-  );
-}
+type SortKey = 'reputation_score' | 'win_rate' | 'total_responses';
 
 export default function LeaderboardPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [capFilter, setCapFilter] = useState('all');
+  const [sortKey, setSortKey] = useState<SortKey>('reputation_score');
+  const [sortAsc, setSortAsc] = useState(false);
 
   useEffect(() => {
     api.getLeaderboard()
@@ -108,62 +60,286 @@ export default function LeaderboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const total = agents.length;
-  const avgRep = total ? Math.round(agents.reduce((s, a) => s + a.reputation_score, 0) / total) : 0;
-  const topRep = agents[0]?.reputation_score ?? 0;
+  const maxRep = agents.reduce((m, a) => Math.max(m, a.reputation_score), 0);
+  const avgRep = agents.length ? Math.round(agents.reduce((s, a) => s + a.reputation_score, 0) / agents.length) : 0;
+
+  const filtered = agents
+    .filter((a) => capFilter === 'all' || (a.capabilities ?? []).includes(capFilter))
+    .sort((a, b) => {
+      const av = a[sortKey] ?? 0;
+      const bv = b[sortKey] ?? 0;
+      return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number);
+    });
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortAsc((v) => !v);
+    else { setSortKey(key); setSortAsc(false); }
+  }
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return null;
+    return sortAsc
+      ? <ChevronUp className="w-3 h-3 inline ml-1" />
+      : <ChevronDown className="w-3 h-3 inline ml-1" />;
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-          <Trophy className="w-8 h-8 text-yellow-400" /> Agent Leaderboard
+        <h1 className="text-3xl font-black flex items-center gap-3" style={{ color: '#f1f5f9' }}>
+          <Trophy className="w-8 h-8" style={{ color: '#eab308' }} />
+          Agent Leaderboard
         </h1>
-        <p className="text-gray-400 mt-1">Ranked by on-chain reputation score</p>
+        <p className="mt-1 text-sm" style={{ color: '#475569' }}>
+          Ranked by on-chain reputation score · Updated in real-time
+        </p>
       </div>
 
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[
-          { icon: <Shield className="w-5 h-5 text-monad-purple" />, label: "Active Agents", value: total },
-          { icon: <TrendingUp className="w-5 h-5 text-monad-cyan" />, label: "Avg Reputation", value: avgRep.toLocaleString() },
-          { icon: <Zap className="w-5 h-5 text-yellow-400" />, label: "Top Score", value: topRep.toLocaleString() },
-        ].map((s) => (
-          <div key={s.label} className="bg-monad-card border border-monad-border rounded-xl p-4 flex items-center gap-3">
-            {s.icon}
+          { icon: Shield, label: 'Total Agents', value: agents.length, color: '#6366f1' },
+          { icon: TrendingUp, label: 'Avg Reputation', value: avgRep.toLocaleString(), color: '#06b6d4' },
+          { icon: Zap, label: 'Top Score', value: (agents[0]?.reputation_score ?? 0).toLocaleString(), color: '#eab308' },
+        ].map(({ icon: Icon, label, value, color }) => (
+          <div key={label} className="card p-5 flex items-center gap-4">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: `${color}12`, border: `1px solid ${color}25` }}
+            >
+              <Icon className="w-5 h-5" style={{ color }} />
+            </div>
             <div>
-              <div className="text-2xl font-bold text-white">{s.value}</div>
-              <div className="text-xs text-gray-400">{s.label}</div>
+              <div className="text-xl font-black font-mono" style={{ color }}>{value}</div>
+              <div className="text-xs" style={{ color: '#475569' }}>{label}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-monad-card border border-monad-border rounded-xl overflow-hidden">
+      {/* Filters */}
+      <div className="flex items-center gap-2 flex-wrap mb-6">
+        <span className="text-xs font-mono" style={{ color: '#475569' }}>FILTER:</span>
+        {['all', ...ALL_CAPS].map((c) => (
+          <button
+            key={c}
+            onClick={() => setCapFilter(c)}
+            className="px-3 py-1 rounded-lg text-xs font-mono transition-all capitalize"
+            style={{
+              background: capFilter === c ? 'rgba(99,102,241,0.2)' : 'var(--bg-card)',
+              border: `1px solid ${capFilter === c ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.1)'}`,
+              color: capFilter === c ? '#818cf8' : '#475569',
+            }}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {/* Top 3 Hero Cards */}
+      {!loading && filtered.length >= 1 && (
+        <div className="grid md:grid-cols-3 gap-4 mb-8">
+          {[1, 0, 2].map((slot, idx) => {
+            const agent = filtered[slot];
+            if (!agent) return <div key={idx} />;
+            const rank = slot + 1;
+            const rc = RANK_CONFIG[slot] ?? { medal: `#${rank}`, glow: '', border: 'rgba(99,102,241,0.15)', color: '#94a3b8' };
+            const tier = TIER_CONFIG[agent.tier] ?? { color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.2)', glyph: '?', label: agent.tier };
+            const isFirst = slot === 0;
+            return (
+              <div
+                key={agent.address}
+                className="card p-6 text-center relative overflow-hidden"
+                style={{
+                  borderColor: rc.border,
+                  boxShadow: isFirst ? `0 0 40px ${rc.glow}` : undefined,
+                  marginTop: isFirst ? 0 : 16,
+                }}
+              >
+                {isFirst && (
+                  <div
+                    className="absolute inset-0 opacity-5"
+                    style={{ background: 'radial-gradient(circle at 50% 0%, #eab308, transparent 70%)' }}
+                  />
+                )}
+                <div className="text-4xl mb-3">{rc.medal}</div>
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 text-xl font-black"
+                  style={{ background: tier.bg, border: `1px solid ${tier.border}`, color: tier.color }}
+                >
+                  {tier.glyph}
+                </div>
+                <h3 className="font-bold mb-1" style={{ color: '#f1f5f9' }}>
+                  {agent.name || `${tier.label} Agent`}
+                </h3>
+                <p className="text-xs font-mono mb-4" style={{ color: '#475569' }}>
+                  {fmtAddr(agent.address)}
+                </p>
+                <div className="text-2xl font-black font-mono mb-1" style={{ color: rc.color }}>
+                  {agent.reputation_score.toLocaleString()}
+                </div>
+                <div className="text-xs mb-4" style={{ color: '#475569' }}>Reputation Score</div>
+                <div className="flex justify-center gap-4 text-xs">
+                  <span style={{ color: '#10b981' }}>
+                    {((agent.win_rate ?? 0) * 100).toFixed(0)}% win
+                  </span>
+                  <span style={{ color: '#64748b' }}>
+                    {agent.total_responses ?? 0} resp
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Full Table */}
+      <div
+        className="rounded-2xl overflow-hidden"
+        style={{ background: 'var(--bg-card)', border: '1px solid rgba(99,102,241,0.15)' }}
+      >
         {loading ? (
-          <div className="text-center py-20 text-gray-500">Loading agents…</div>
-        ) : agents.length === 0 ? (
-          <div className="text-center py-20 text-gray-500">
-            No agents registered yet. Start the agent nodes to populate this table.
+          <div className="p-8 space-y-3">
+            {[1,2,3,4,5].map((i) => (
+              <div key={i} className="skeleton h-14 w-full rounded-xl" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-20">
+            <Cpu className="w-12 h-12 mx-auto mb-4" style={{ color: '#1e293b' }} />
+            <p className="font-semibold" style={{ color: '#475569' }}>No agents found</p>
+            <p className="text-sm mt-1" style={{ color: '#334155' }}>
+              Start the agent nodes to populate the leaderboard.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-monad-border bg-monad-dark/60">
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">#</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Agent</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Tier</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Reputation</th>
-                  <th className="px-6 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Responses</th>
-                  <th className="px-6 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Win Rate</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Capabilities</th>
+                <tr style={{ borderBottom: '1px solid rgba(99,102,241,0.08)', background: 'rgba(0,0,0,0.2)' }}>
+                  {[
+                    { label: '#', key: null },
+                    { label: 'Agent', key: null },
+                    { label: 'Tier', key: null },
+                    { label: 'Reputation', key: 'reputation_score' as SortKey },
+                    { label: 'Responses', key: 'total_responses' as SortKey },
+                    { label: 'Win Rate', key: 'win_rate' as SortKey },
+                    { label: 'Capabilities', key: null },
+                  ].map(({ label, key }) => (
+                    <th
+                      key={label}
+                      className="px-5 py-3 text-left text-xs font-mono uppercase tracking-wider select-none"
+                      style={{
+                        color: (key && sortKey === key) ? '#818cf8' : '#334155',
+                        cursor: key ? 'pointer' : 'default',
+                      }}
+                      onClick={() => key && toggleSort(key)}
+                    >
+                      {label}
+                      {key && <SortIcon col={key} />}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {agents.map((agent, i) => (
-                  <AgentRow key={agent.address} agent={agent} rank={i + 1} />
-                ))}
+                {filtered.map((agent, i) => {
+                  const rank = i + 1;
+                  const isTop3 = rank <= 3;
+                  const rc = RANK_CONFIG[i];
+                  const tier = TIER_CONFIG[agent.tier] ?? { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', border: 'rgba(148,163,184,0.15)', glyph: '?', label: agent.tier };
+
+                  return (
+                    <tr
+                      key={agent.address}
+                      className="transition-colors hover:bg-white/[0.02]"
+                      style={{
+                        borderBottom: '1px solid rgba(99,102,241,0.06)',
+                        background: isTop3 ? `${rc?.glow?.replace('0.25', '0.03') ?? ''}` : undefined,
+                      }}
+                    >
+                      {/* Rank */}
+                      <td className="px-5 py-4 w-14">
+                        {isTop3 ? (
+                          <span className="text-xl">{rc?.medal}</span>
+                        ) : (
+                          <span className="text-sm font-mono" style={{ color: '#334155' }}>{rank}</span>
+                        )}
+                      </td>
+
+                      {/* Agent */}
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
+                            style={{ background: tier.bg, border: `1px solid ${tier.border}`, color: tier.color }}
+                          >
+                            {tier.glyph}
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>
+                              {agent.name || `${tier.label} Agent`}
+                            </div>
+                            <div className="text-xs font-mono" style={{ color: '#334155' }}>
+                              {fmtAddr(agent.address)}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Tier */}
+                      <td className="px-5 py-4">
+                        <span
+                          className="text-xs font-mono px-2 py-0.5 rounded-full"
+                          style={{ background: tier.bg, color: tier.color, border: `1px solid ${tier.border}` }}
+                        >
+                          {tier.glyph} {tier.label}
+                        </span>
+                      </td>
+
+                      {/* Reputation bar */}
+                      <td className="px-5 py-4 w-48">
+                        <ReputationBar score={agent.reputation_score} maxScore={maxRep} />
+                      </td>
+
+                      {/* Responses */}
+                      <td className="px-5 py-4 text-center font-mono text-sm" style={{ color: '#94a3b8' }}>
+                        {agent.total_responses ?? 0}
+                      </td>
+
+                      {/* Win rate */}
+                      <td className="px-5 py-4 text-center font-mono text-sm">
+                        <span style={{ color: (agent.win_rate ?? 0) > 0.5 ? '#10b981' : '#64748b' }}>
+                          {((agent.win_rate ?? 0) * 100).toFixed(1)}%
+                        </span>
+                      </td>
+
+                      {/* Capabilities */}
+                      <td className="px-5 py-4">
+                        <div className="flex flex-wrap gap-1">
+                          {(agent.capabilities ?? []).slice(0, 3).map((c) => (
+                            <span
+                              key={c}
+                              className="text-xs px-1.5 py-0.5 rounded font-mono"
+                              style={{
+                                background: 'rgba(99,102,241,0.08)',
+                                color: '#475569',
+                                border: '1px solid rgba(99,102,241,0.1)',
+                              }}
+                            >
+                              {c}
+                            </span>
+                          ))}
+                          {(agent.capabilities ?? []).length > 3 && (
+                            <span className="text-xs" style={{ color: '#334155' }}>
+                              +{agent.capabilities.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
