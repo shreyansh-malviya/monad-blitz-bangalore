@@ -42,6 +42,7 @@ packages/contracts/broadcast/
 
 # ── Logs ───────────────────────────────────────────────────────────────────────
 *.log
+*.txt
 logs/
 test-users/
 
