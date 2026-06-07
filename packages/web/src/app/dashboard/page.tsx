@@ -3,174 +3,281 @@
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { Activity, Zap, Trophy, Clock, Cpu, TrendingUp, CheckCircle, XCircle, Loader2 } from "lucide-react";
-import { api, Query, Agent } from "@/lib/api";
+import {
+  api,
+  type Query,
+  shortId,
+  fmtDate,
+  timeAgo,
+  scoreColor,
+  CAPABILITIES,
+} from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 
-const POLL_INTERVAL = 4000;
-const CAPABILITIES = ['coding', 'math', 'research', 'analysis', 'writing', 'blockchain', 'general'];
+/* ─── Query row ──────────────────────────────────────────────────── */
+function QueryRow({ q }: { q: Query }) {
+  const [expanded, setExpanded] = useState(false);
+  const bestScore =
+    q.responses && q.responses.length > 0
+      ? Math.max(...q.responses.map((r) => r.score ?? 0))
+      : null;
 
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString();
-}
-
-function fmtAddr(a: string) {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`;
-}
-
-// ── Stat Card ────────────────────────────────────────────────
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-  color,
-  big,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | number;
-  sub?: string;
-  color: string;
-  big?: boolean;
-}) {
   return (
-    <div
-      className="card p-6 relative overflow-hidden group"
-    >
-      <div
-        className="absolute top-0 left-0 right-0 h-px"
-        style={{ background: `linear-gradient(90deg, transparent, ${color}40, transparent)` }}
-      />
-      <div
-        className="w-9 h-9 rounded-xl flex items-center justify-center mb-4"
-        style={{ background: `${color}15`, border: `1px solid ${color}25` }}
+    <>
+      <tr
+        onClick={() => setExpanded((v) => !v)}
+        style={{ cursor: "pointer" }}
+        aria-expanded={expanded}
+        role="row"
       >
-        <div style={{ color }}>{icon}</div>
-      </div>
-      <div
-        className={`font-black font-mono ${big ? 'text-4xl' : 'text-2xl'} mb-1`}
-        style={{ color }}
-      >
-        {value}
-      </div>
-      <div className="text-sm" style={{ color: '#64748b' }}>{label}</div>
-      {sub && <div className="text-xs mt-1" style={{ color: '#334155' }}>{sub}</div>}
-    </div>
+        <td>
+          <span className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>
+            {shortId(q.id)}
+          </span>
+        </td>
+        <td>
+          <div
+            style={{
+              maxWidth: 320,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 13,
+            }}
+            title={q.problem}
+          >
+            {q.problem}
+          </div>
+        </td>
+        <td>
+          <StatusBadge status={q.status} size="md" />
+        </td>
+        <td>
+          <span className="mono" style={{ fontSize: 12 }}>
+            {q.round}
+          </span>
+        </td>
+        <td>
+          {bestScore !== null ? (
+            <span
+              className="mono"
+              style={{ fontSize: 12, color: scoreColor(bestScore), fontWeight: 500 }}
+            >
+              {bestScore.toFixed(2)}
+            </span>
+          ) : (
+            <span style={{ color: "var(--text-3)", fontSize: 12 }}>—</span>
+          )}
+        </td>
+        <td>
+          <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+            {timeAgo(q.created_at)}
+          </span>
+        </td>
+        <td>
+          <span style={{ fontSize: 10, color: "var(--text-3)" }}>
+            {expanded ? "▲" : "▼"}
+          </span>
+        </td>
+      </tr>
+
+      {expanded && (
+        <tr role="row">
+          <td
+            colSpan={7}
+            style={{ padding: "12px 16px", background: "var(--bg-subtle)" }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Problem */}
+              <div>
+                <div className="section-label" style={{ marginBottom: 6 }}>
+                  Problem
+                </div>
+                <p style={{ fontSize: 12, lineHeight: 1.6 }}>{q.problem}</p>
+              </div>
+
+              {/* Metadata row */}
+              <div className="meta-grid">
+                <span className="meta-key">Capabilities</span>
+                <span className="meta-val">{q.capabilities.join(", ")}</span>
+                <span className="meta-key">Bounty</span>
+                <span className="meta-val">{q.bounty} MON</span>
+                <span className="meta-key">Created</span>
+                <span className="meta-val">{fmtDate(q.created_at)}</span>
+                {q.winner_address && (
+                  <>
+                    <span className="meta-key">Winner</span>
+                    <span className="meta-val" style={{ color: "var(--green)" }}>
+                      {q.winner_address}
+                    </span>
+                  </>
+                )}
+                {q.memory_hash && (
+                  <>
+                    <span className="meta-key">Memory hash</span>
+                    <span className="meta-val">{q.memory_hash.slice(0, 24)}…</span>
+                  </>
+                )}
+                {q.tx_hash && (
+                  <>
+                    <span className="meta-key">Tx hash</span>
+                    <span className="meta-val">{q.tx_hash.slice(0, 24)}…</span>
+                  </>
+                )}
+              </div>
+
+              {/* Responses summary */}
+              {q.responses && q.responses.length > 0 && (
+                <div>
+                  <div className="section-label" style={{ marginBottom: 6 }}>
+                    Responses ({q.responses.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {q.responses.map((r) => (
+                      <div
+                        key={r.id}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto auto",
+                          gap: 12,
+                          padding: "6px 10px",
+                          border: "1px solid var(--border)",
+                          borderRadius: "var(--radius-sm)",
+                          alignItems: "center",
+                          background:
+                            r.agent_address === q.winner_address
+                              ? "var(--green-dim)"
+                              : "var(--bg)",
+                        }}
+                      >
+                        <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>
+                          {r.agent_address.slice(0, 10)}…{r.agent_address.slice(-4)}
+                        </span>
+                        <span style={{ fontSize: 11, color: "var(--text-3)" }}>
+                          rd {r.round}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 500,
+                            color: r.score !== null ? scoreColor(r.score) : "var(--text-3)",
+                          }}
+                        >
+                          {r.score !== null ? r.score.toFixed(2) : "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-// ── Reputation Ring ────────────────────────────────────────
-function ReputationRing({ score, maxScore = 10000 }: { score: number; maxScore?: number }) {
-  const pct = Math.min(1, score / maxScore);
-  const r = 52;
-  const circ = 2 * Math.PI * r;
-  const dash = circ * pct;
-  const color = pct > 0.6 ? '#10b981' : pct > 0.4 ? '#eab308' : '#6366f1';
-
-  return (
-    <div className="relative w-36 h-36 flex items-center justify-center mx-auto">
-      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 120 120">
-        <circle cx="60" cy="60" r={r} fill="none" stroke="rgba(99,102,241,0.1)" strokeWidth="8" />
-        <circle
-          cx="60" cy="60" r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth="8"
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${circ}`}
-          style={{ filter: `drop-shadow(0 0 8px ${color})`, transition: 'stroke-dasharray 1s ease' }}
-        />
-      </svg>
-      <div className="text-center z-10">
-        <div className="text-2xl font-black font-mono" style={{ color }}>
-          {score.toLocaleString()}
-        </div>
-        <div className="text-xs" style={{ color: '#475569' }}>REP</div>
-      </div>
-    </div>
-  );
-}
-
-// ── Register Agent Form ───────────────────────────────────
-function RegisterAgentForm({ address }: { address: string }) {
-  const [name, setName] = useState('');
-  const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
-  const [stake, setStake] = useState('1.0');
+/* ─── New query form (inline) ──────────────────────────────────────── */
+function NewQueryForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [problem, setProblem] = useState("");
+  const [caps, setCaps] = useState<string[]>(["general"]);
+  const [bounty, setBounty] = useState("0");
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [err, setErr] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (problem.trim().length < 10 || caps.length === 0) return;
     setLoading(true);
-    setErr('');
+    setError(null);
     try {
-      // Registration would call a smart contract in production
-      // For demo, we just show success
-      await new Promise((r) => setTimeout(r, 1500));
-      setSuccess(true);
-    } catch (ex) {
-      setErr(String(ex));
+      await api.createQuery({ problem: problem.trim(), capabilities: caps, bounty });
+      setProblem("");
+      setCaps(["general"]);
+      setBounty("0");
+      setOpen(false);
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Submission failed.");
     } finally {
       setLoading(false);
     }
   }
 
-  if (success) {
+  if (!open) {
     return (
-      <div className="text-center py-12">
-        <CheckCircle className="w-12 h-12 mx-auto mb-4" style={{ color: '#10b981' }} />
-        <h3 className="text-xl font-bold mb-2" style={{ color: '#f1f5f9' }}>Agent Registered!</h3>
-        <p className="text-sm" style={{ color: '#64748b' }}>
-          Your agent will appear on the leaderboard once it processes its first query.
-        </p>
-      </div>
+      <button className="btn btn-primary" onClick={() => setOpen(true)}>
+        + New query
+      </button>
     );
   }
 
   return (
-    <form onSubmit={submit} className="space-y-5">
-      <div>
-        <label className="text-xs font-mono mb-1.5 block" style={{ color: '#64748b' }}>
-          AGENT NAME
+    <form
+      onSubmit={submit}
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        background: "var(--bg)",
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        marginBottom: 20,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 4,
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600 }}>New query</span>
+        <button
+          type="button"
+          className="btn"
+          style={{ padding: "2px 8px", fontSize: 11 }}
+          onClick={() => setOpen(false)}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="field">
+        <label className="field-label" htmlFor="dash-problem">
+          Problem statement
         </label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. AlphaBot-7"
-          className="w-full rounded-xl px-4 py-2.5 text-sm focus:outline-none transition-colors"
-          style={{
-            background: 'rgba(0,0,0,0.3)',
-            border: '1px solid rgba(99,102,241,0.15)',
-            color: '#e2e8f0',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.15)'; }}
+        <textarea
+          id="dash-problem"
+          className="input"
+          placeholder="What do you need agents to solve?"
+          value={problem}
+          onChange={(e) => setProblem(e.target.value)}
+          rows={4}
+          required
+          minLength={10}
         />
       </div>
 
-      <div>
-        <label className="text-xs font-mono mb-1.5 block" style={{ color: '#64748b' }}>
-          CAPABILITIES
-        </label>
-        <div className="flex flex-wrap gap-2">
+      <div className="field">
+        <span className="field-label">Capabilities</span>
+        <div className="cap-filters">
           {CAPABILITIES.map((c) => (
             <button
               key={c}
               type="button"
+              className={`tag${caps.includes(c) ? " selected" : ""}`}
               onClick={() =>
-                setSelectedCaps((prev) =>
+                setCaps((prev) =>
                   prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
                 )
               }
-              className="px-3 py-1 rounded-full text-xs font-mono transition-all capitalize"
-              style={{
-                background: selectedCaps.includes(c) ? 'rgba(99,102,241,0.2)' : 'rgba(0,0,0,0.3)',
-                border: `1px solid ${selectedCaps.includes(c) ? 'rgba(99,102,241,0.5)' : 'rgba(99,102,241,0.12)'}`,
-                color: selectedCaps.includes(c) ? '#818cf8' : '#64748b',
-              }}
+              aria-pressed={caps.includes(c)}
             >
               {c}
             </button>
@@ -178,367 +285,287 @@ function RegisterAgentForm({ address }: { address: string }) {
         </div>
       </div>
 
-      <div>
-        <label className="text-xs font-mono mb-1.5 block" style={{ color: '#64748b' }}>
-          INITIAL STAKE (MON)
+      <div className="field" style={{ maxWidth: 160 }}>
+        <label className="field-label" htmlFor="dash-bounty">
+          Bounty (MON)
         </label>
+        <input
+          id="dash-bounty"
+          type="number"
+          className="input"
+          value={bounty}
+          onChange={(e) => setBounty(e.target.value)}
+          min="0"
+          step="0.001"
+        />
+      </div>
+
+      {error && (
         <div
-          className="flex items-center gap-2 rounded-xl px-4 py-2.5"
+          role="alert"
           style={{
-            background: 'rgba(0,0,0,0.3)',
-            border: '1px solid rgba(99,102,241,0.15)',
+            padding: "8px 12px",
+            background: "var(--red-dim)",
+            border: "1px solid var(--red)",
+            borderRadius: "var(--radius)",
+            fontSize: 12,
+            color: "var(--red)",
           }}
         >
-          <input
-            type="number"
-            value={stake}
-            onChange={(e) => setStake(e.target.value)}
-            min="0.1"
-            step="0.1"
-            className="bg-transparent text-sm font-mono focus:outline-none flex-1"
-            style={{ color: '#e2e8f0' }}
-          />
-          <span className="text-sm font-bold" style={{ color: '#818cf8' }}>MON</span>
+          {error}
         </div>
-      </div>
-
-      <div
-        className="rounded-xl px-4 py-3 text-xs font-mono"
-        style={{
-          background: 'rgba(99,102,241,0.06)',
-          border: '1px solid rgba(99,102,241,0.12)',
-          color: '#64748b',
-        }}
-      >
-        Registering as: {fmtAddr(address)}
-      </div>
-
-      {err && (
-        <p
-          className="text-sm px-3 py-2 rounded-lg"
-          style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}
-        >
-          {err}
-        </p>
       )}
 
-      <button
-        type="submit"
-        disabled={loading || !name.trim() || selectedCaps.length === 0}
-        className="btn-primary w-full flex items-center justify-center gap-2 py-3"
-      >
-        {loading ? (
-          <><Loader2 className="w-4 h-4 animate-spin" /> Registering…</>
-        ) : (
-          <><Cpu className="w-4 h-4" /> Register Agent</>
-        )}
-      </button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={loading || problem.trim().length < 10 || caps.length === 0}
+        >
+          {loading ? "Submitting…" : "Submit"}
+        </button>
+        <button type="button" className="btn" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }
 
-// ── Connected Dashboard ────────────────────────────────────
-function ConnectedDashboard({ address }: { address: string }) {
+/* ─── Main page ──────────────────────────────────────────────────── */
+export default function DashboardPage() {
+  const { address, isConnected } = useAccount();
   const [queries, setQueries] = useState<Query[]>([]);
-  const [agent, setAgent] = useState<Agent | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'queries' | 'register'>('overview');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  async function fetchQueries() {
+    if (!isConnected) return;
+    setLoading(true);
+    try {
+      const all = await api.getQueries({ limit: 100 });
+      setQueries(all.filter((q) => q.requester?.toLowerCase() === address?.toLowerCase()));
+      setError(null);
+    } catch {
+      setError("Could not load queries.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      try {
-        const [qs, ag] = await Promise.all([
-          api.getQueries({ limit: 20 }),
-          api.getAgents().then((agents) =>
-            agents.find((a) => a.address.toLowerCase() === address.toLowerCase()) ?? null
-          ),
-        ]);
-        setQueries(qs);
-        setAgent(ag);
-      } catch {
-        // api offline
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-    const iv = setInterval(load, POLL_INTERVAL);
-    return () => clearInterval(iv);
-  }, [address]);
-
-  const settled = queries.filter((q) => q.status === 'settled').length;
-  const active = queries.filter((q) => !['settled', 'failed'].includes(q.status)).length;
-  const totalMon = queries.reduce((s, q) => s + (parseFloat(q.reward) || 0), 0);
-  const winRate = agent ? ((agent.win_rate ?? 0) * 100).toFixed(1) : '—';
-
-  return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-black" style={{ color: '#f1f5f9' }}>Dashboard</h1>
-          <p className="text-xs font-mono mt-1" style={{ color: '#475569' }}>
-            {fmtAddr(address)}
-          </p>
-        </div>
-        <ConnectButton chainStatus="icon" showBalance={false} />
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 mb-8 p-1 rounded-xl w-fit" style={{ background: 'var(--bg-card)', border: '1px solid rgba(99,102,241,0.12)' }}>
-        {(['overview', 'queries', 'register'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-all capitalize"
-            style={{
-              background: tab === t ? 'rgba(99,102,241,0.2)' : 'transparent',
-              color: tab === t ? '#818cf8' : '#64748b',
-              border: tab === t ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
-            }}
-          >
-            {t === 'register' ? 'Register Agent' : t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {/* Overview tab */}
-      {tab === 'overview' && (
-        <div className="space-y-6">
-          {/* Stats grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard
-              icon={<Activity className="w-5 h-5" />}
-              label="Total Queries"
-              value={queries.length}
-              color="#818cf8"
-            />
-            <StatCard
-              icon={<Zap className="w-5 h-5" />}
-              label="Active"
-              value={active}
-              color="#06b6d4"
-            />
-            <StatCard
-              icon={<Trophy className="w-5 h-5" />}
-              label="Settled"
-              value={settled}
-              color="#10b981"
-            />
-            <StatCard
-              icon={<Clock className="w-5 h-5" />}
-              label="MON Posted"
-              value={`${totalMon.toFixed(2)}`}
-              color="#eab308"
-            />
-          </div>
-
-          {/* Agent section */}
-          {agent ? (
-            <div className="grid md:grid-cols-3 gap-5">
-              {/* Reputation ring */}
-              <div className="card p-6 text-center">
-                <p className="text-xs font-mono mb-4" style={{ color: '#475569' }}>REPUTATION</p>
-                <ReputationRing score={agent.reputation_score} />
-                <div
-                  className="mt-4 text-sm px-3 py-1 rounded-full font-mono inline-block"
-                  style={{
-                    background: 'rgba(99,102,241,0.1)',
-                    color: '#818cf8',
-                    border: '1px solid rgba(99,102,241,0.25)',
-                  }}
-                >
-                  {agent.tier?.toUpperCase()} TIER
-                </div>
-              </div>
-
-              {/* Agent stats */}
-              <div className="card p-6 space-y-4 md:col-span-2">
-                <h3 className="font-bold" style={{ color: '#f1f5f9' }}>
-                  {agent.name || 'Your Agent'}
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs font-mono mb-1" style={{ color: '#475569' }}>WIN RATE</p>
-                    <p className="text-2xl font-black font-mono" style={{ color: '#10b981' }}>{winRate}%</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-mono mb-1" style={{ color: '#475569' }}>TOTAL RESPONSES</p>
-                    <p className="text-2xl font-black font-mono" style={{ color: '#06b6d4' }}>
-                      {agent.total_responses ?? 0}
-                    </p>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-mono mb-2" style={{ color: '#475569' }}>CAPABILITIES</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(agent.capabilities ?? []).map((c) => (
-                      <span
-                        key={c}
-                        className="text-xs px-2 py-0.5 rounded-full font-mono"
-                        style={{
-                          background: 'rgba(99,102,241,0.1)',
-                          color: '#818cf8',
-                          border: '1px solid rgba(99,102,241,0.2)',
-                        }}
-                      >
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-mono mb-2" style={{ color: '#475569' }}>STATUS</p>
-                  <div className="flex items-center gap-2">
-                    {agent.is_active ? (
-                      <><CheckCircle className="w-4 h-4" style={{ color: '#10b981' }} />
-                        <span className="text-sm" style={{ color: '#10b981' }}>Active</span></>
-                    ) : (
-                      <><XCircle className="w-4 h-4" style={{ color: '#ef4444' }} />
-                        <span className="text-sm" style={{ color: '#ef4444' }}>Inactive</span></>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="card p-8 text-center">
-              <Cpu className="w-12 h-12 mx-auto mb-4" style={{ color: '#334155' }} />
-              <h3 className="font-bold mb-2" style={{ color: '#94a3b8' }}>No Agent Registered</h3>
-              <p className="text-sm mb-6" style={{ color: '#475569' }}>
-                Register your AI agent to start competing for bounties and building reputation.
-              </p>
-              <button onClick={() => setTab('register')} className="btn-primary">
-                Register Agent
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Queries tab */}
-      {tab === 'queries' && (
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{ background: 'var(--bg-card)', border: '1px solid rgba(99,102,241,0.15)' }}
-        >
-          <div
-            className="px-6 py-4 flex items-center justify-between"
-            style={{ borderBottom: '1px solid rgba(99,102,241,0.1)' }}
-          >
-            <h2 className="font-semibold" style={{ color: '#e2e8f0' }}>Recent Queries</h2>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-xs" style={{ color: '#475569' }}>Live</span>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="p-6 space-y-3">
-              {[1,2,3].map((i) => <div key={i} className="skeleton h-14 w-full rounded-xl" />)}
-            </div>
-          ) : queries.length === 0 ? (
-            <div className="text-center py-16">
-              <p style={{ color: '#475569' }}>No queries yet.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(99,102,241,0.08)', background: 'rgba(0,0,0,0.15)' }}>
-                    {['ID', 'Problem', 'Status', 'Reward', 'Created'].map((h) => (
-                      <th
-                        key={h}
-                        className="px-5 py-3 text-left text-xs font-mono uppercase tracking-wider"
-                        style={{ color: '#334155' }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {queries.map((q, i) => (
-                    <tr
-                      key={q.id}
-                      className="transition-colors hover:bg-white/[0.02]"
-                      style={{ borderBottom: '1px solid rgba(99,102,241,0.06)' }}
-                    >
-                      <td className="px-5 py-3 text-xs font-mono" style={{ color: '#475569' }}>
-                        #{q.id.slice(0, 8)}
-                      </td>
-                      <td className="px-5 py-3 text-sm max-w-xs" style={{ color: '#cbd5e1' }}>
-                        <span className="line-clamp-1">{q.problem}</span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <StatusBadge status={q.status} />
-                      </td>
-                      <td className="px-5 py-3 text-sm font-mono font-bold" style={{ color: '#818cf8' }}>
-                        {q.reward} MON
-                      </td>
-                      <td className="px-5 py-3 text-xs" style={{ color: '#334155' }}>
-                        {fmtTime(q.created_at)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Register tab */}
-      {tab === 'register' && (
-        <div className="max-w-lg">
-          <div className="card p-7">
-            <div className="flex items-center gap-3 mb-6">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}
-              >
-                <Cpu className="w-5 h-5" style={{ color: '#818cf8' }} />
-              </div>
-              <div>
-                <h2 className="font-bold" style={{ color: '#f1f5f9' }}>Register Agent</h2>
-                <p className="text-xs" style={{ color: '#475569' }}>Join the marketplace as an AI agent</p>
-              </div>
-            </div>
-            <RegisterAgentForm address={address} />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main Export ───────────────────────────────────────────────
-export default function DashboardPage() {
-  const { isConnected, address } = useAccount();
+    fetchQueries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, isConnected]);
 
   if (!isConnected) {
     return (
-      <div className="min-h-[80vh] flex items-center justify-center px-4">
-        <div className="text-center max-w-sm">
+      <div className="dash-page">
+        <div
+          style={{
+            maxWidth: 400,
+            margin: "80px auto",
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 16,
+          }}
+        >
           <div
-            className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6"
             style={{
-              background: 'rgba(99,102,241,0.1)',
-              border: '1px solid rgba(99,102,241,0.25)',
-              boxShadow: '0 0 40px rgba(99,102,241,0.1)',
+              width: 48,
+              height: 48,
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 20,
+              color: "var(--text-3)",
             }}
           >
-            <TrendingUp className="w-9 h-9" style={{ color: '#818cf8' }} />
+            ⬡
           </div>
-          <h1 className="text-2xl font-black mb-3" style={{ color: '#f1f5f9' }}>Connect Your Wallet</h1>
-          <p className="text-sm mb-8 leading-relaxed" style={{ color: '#64748b' }}>
-            Connect your wallet to view your dashboard, track queries, and register as an agent on MonadBlitz.
-          </p>
-          <ConnectButton />
+          <div>
+            <h2
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                marginBottom: 6,
+                letterSpacing: "-0.01em",
+              }}
+            >
+              Connect your wallet
+            </h2>
+            <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.55 }}>
+              Connect a wallet to view your submitted queries and track results.
+            </p>
+          </div>
+          <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
         </div>
       </div>
     );
   }
 
-  return <ConnectedDashboard address={address ?? ''} />;
+  const statusOptions = ["all", "routing", "collecting", "scoring", "escalating", "settled", "failed"];
+  const filtered =
+    statusFilter === "all"
+      ? queries
+      : queries.filter((q) => q.status.toLowerCase() === statusFilter);
+
+  const stats = {
+    total: queries.length,
+    settled: queries.filter((q) => q.status === "SETTLED").length,
+    active: queries.filter((q) => !["SETTLED", "FAILED"].includes(q.status)).length,
+    failed: queries.filter((q) => q.status === "FAILED").length,
+  };
+
+  return (
+    <div className="dash-page">
+      <div style={{ marginBottom: 24 }}>
+        <h1
+          style={{
+            fontSize: 18,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+            marginBottom: 4,
+          }}
+        >
+          Dashboard
+        </h1>
+        <p style={{ fontSize: 12, color: "var(--text-3)" }}>
+          Queries submitted from{" "}
+          <span className="mono" style={{ fontSize: 11 }}>
+            {address?.slice(0, 8)}…{address?.slice(-6)}
+          </span>
+        </p>
+      </div>
+
+      {/* Stats */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        {loading ? (
+          [1, 2, 3, 4].map((i) => (
+            <div key={i} className="stat-card">
+              <div className="skeleton" style={{ height: 22, width: 40, marginBottom: 6 }} />
+              <div className="skeleton" style={{ height: 11, width: 64 }} />
+            </div>
+          ))
+        ) : (
+          [
+            { value: stats.total, label: "Total queries" },
+            { value: stats.settled, label: "Settled" },
+            { value: stats.active, label: "In progress" },
+            { value: stats.failed, label: "Failed" },
+          ].map(({ value, label }) => (
+            <div key={label} className="stat-card">
+              <div className="stat-value">{value}</div>
+              <div className="stat-label">{label}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* New query form */}
+      <NewQueryForm onCreated={fetchQueries} />
+
+      {/* Filter tabs + table */}
+      <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginBottom: 12 }}>
+        {statusOptions.map((s) => (
+          <button
+            key={s}
+            className={`filter-tab${statusFilter === s ? " active" : ""}`}
+            onClick={() => setStatusFilter(s)}
+            aria-pressed={statusFilter === s}
+          >
+            {s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="skeleton"
+              style={{ height: 44, borderRadius: "var(--radius-sm)" }}
+            />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="empty-state">
+          <h3>Error</h3>
+          <p>{error}</p>
+          <button className="btn" style={{ marginTop: 12 }} onClick={fetchQueries}>
+            Retry
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <h3>No queries</h3>
+          <p>
+            {queries.length === 0
+              ? "You haven't submitted any queries yet."
+              : `No queries with status "${statusFilter}".`}
+          </p>
+        </div>
+      ) : (
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            overflow: "hidden",
+          }}
+        >
+          <table className="data-table" aria-label="Your queries">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Problem</th>
+                <th>Status</th>
+                <th>Round</th>
+                <th>Best score</th>
+                <th>Submitted</th>
+                <th style={{ width: 24 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((q) => (
+                <QueryRow key={q.id} q={q} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-3)" }}>
+        {filtered.length} quer{filtered.length !== 1 ? "ies" : "y"}
+        {statusFilter !== "all" ? ` with status "${statusFilter}"` : ""}
+        {" · "}
+        <button
+          onClick={fetchQueries}
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--text-3)",
+            fontSize: 11,
+            cursor: "pointer",
+            padding: 0,
+            textDecoration: "underline",
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
 }

@@ -1,631 +1,802 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { RefreshCw, Search, Plus, X, ChevronDown, ChevronUp, ExternalLink, Zap } from "lucide-react";
-import { api, Query, TaskMemory } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  api,
+  type Query,
+  type QueryResponse,
+  shortId,
+  shortAddr,
+  fmtTime,
+  timeAgo,
+  scoreColor,
+  CAPABILITIES,
+} from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 
-const POLL_INTERVAL = 3000;
-const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL || "https://testnet.monadexplorer.com";
+const FILTERS = ["all", "routing", "collecting", "scoring", "escalating", "settled", "failed"];
 
-function fmtAddr(a: string) {
-  return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "";
-}
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const now = Date.now();
-  const diff = now - d.getTime();
-  if (diff < 60000) return `${Math.round(diff / 1000)}s ago`;
-  if (diff < 3600000) return `${Math.round(diff / 60000)}m ago`;
-  return d.toLocaleTimeString();
-}
-
-// ── Memory Panel ──────────────────────────────────────────────
-function MemoryPanel({ queryId }: { queryId: string }) {
-  const [memory, setMemory] = useState<TaskMemory | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.getMemory(queryId)
-      .then(setMemory)
-      .catch(() => setMemory(null))
-      .finally(() => setLoading(false));
-  }, [queryId]);
-
-  if (loading)
-    return (
-      <div className="p-4 space-y-2">
-        {[1, 2, 3].map((i) => <div key={i} className="skeleton h-6 w-full" />)}
-      </div>
-    );
-
-  if (!memory) return <p className="p-4 text-sm" style={{ color: '#475569' }}>No memory chain yet</p>;
-
-  const events = memory.content?.events ?? [];
-  const rounds: Record<number, typeof events> = {};
-  for (const ev of events) {
-    const r = ev.round ?? 0;
-    (rounds[r] = rounds[r] ?? []).push(ev);
-  }
-
+/* ─── Score bar ───────────────────────────────────────────────────── */
+function ScoreBar({ score }: { score: number | null }) {
+  if (score === null)
+    return <span style={{ color: "var(--text-3)", fontSize: 11 }}>—</span>;
+  const pct = Math.round(score * 100);
+  const color = scoreColor(score);
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-xs font-mono" style={{ color: '#475569' }}>
-          CHAIN HASH:
-        </span>
-        <span className="text-xs font-mono" style={{ color: '#06b6d4' }}>
-          {memory.current_hash ? `${memory.current_hash.slice(0, 24)}…` : 'none'}
-        </span>
+    <div className="score-bar-wrap">
+      <span className="mono" style={{ fontSize: 11, color, minWidth: 28 }}>
+        {score.toFixed(2)}
+      </span>
+      <div className="score-bar-track" style={{ width: 48 }}>
+        <div className="score-bar-fill" style={{ width: `${pct}%`, background: color }} />
       </div>
-
-      {Object.entries(rounds)
-        .sort(([a], [b]) => Number(a) - Number(b))
-        .map(([round, evs]) => (
-          <div
-            key={round}
-            className="rounded-xl overflow-hidden"
-            style={{ border: '1px solid rgba(99,102,241,0.15)' }}
-          >
-            <div
-              className="px-3 py-2 flex items-center gap-2"
-              style={{ background: 'rgba(6,182,212,0.06)' }}
-            >
-              <div
-                className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
-                style={{ background: 'rgba(6,182,212,0.2)', color: '#06b6d4' }}
-              >
-                {round}
-              </div>
-              <span className="text-xs font-semibold" style={{ color: '#06b6d4' }}>
-                Round {round}
-              </span>
-              <span className="text-xs ml-auto" style={{ color: '#475569' }}>
-                {evs.length} event{evs.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-            <div>
-              {evs.map((ev, i) => (
-                <div
-                  key={i}
-                  className="px-3 py-2 text-xs font-mono flex flex-wrap gap-2 items-center"
-                  style={{
-                    borderTop: i > 0 ? '1px solid rgba(99,102,241,0.08)' : undefined,
-                  }}
-                >
-                  <span
-                    className="px-1.5 py-0.5 rounded text-xs"
-                    style={{ background: 'rgba(234,179,8,0.12)', color: '#eab308' }}
-                  >
-                    {ev.type}
-                  </span>
-                  {ev.agent_address && (
-                    <span style={{ color: '#94a3b8' }}>
-                      {fmtAddr(ev.agent_address)}
-                    </span>
-                  )}
-                  {ev.score !== undefined && (
-                    <span
-                      className="font-bold"
-                      style={{
-                        color: ev.score >= 0.75 ? '#10b981' : ev.score >= 0.6 ? '#eab308' : '#ef4444',
-                      }}
-                    >
-                      score={ev.score.toFixed(3)}
-                    </span>
-                  )}
-                  {ev.winner_address && (
-                    <span style={{ color: '#10b981' }}>★ {fmtAddr(ev.winner_address)}</span>
-                  )}
-                  {ev.reason && (
-                    <span style={{ color: '#f97316' }}>
-                      [{String(ev.reason).slice(0, 60)}]
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
     </div>
   );
 }
 
-// ── Query Card ────────────────────────────────────────────────
-function QueryCard({ query, isNew }: { query: Query; isNew?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+/* ─── Response item (collapsible) ──────────────────────────────────── */
+function ResponseItem({
+  r,
+  agentNames,
+  isWinner,
+}: {
+  r: QueryResponse;
+  agentNames: Map<string, string>;
+  isWinner: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = agentNames.get(r.agent_address) ?? shortAddr(r.agent_address);
 
   return (
     <div
-      className="card overflow-hidden"
-      style={{
-        animation: isNew ? 'slideIn 0.4s ease-out' : undefined,
-        borderColor: isNew ? 'rgba(99,102,241,0.35)' : undefined,
-      }}
+      className="response-item"
+      style={isWinner ? { borderColor: "var(--green)" } : undefined}
     >
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left p-4 flex items-start gap-4 hover:bg-white/[0.02] transition-colors"
+      <div
+        className="response-header"
+        onClick={() => setOpen((v) => !v)}
+        role="button"
+        aria-expanded={open}
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && setOpen((v) => !v)}
       >
-        <div className="flex-1 min-w-0 space-y-2">
-          {/* Row 1: status + meta */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={query.status} />
-            <span className="text-xs font-mono" style={{ color: '#475569' }}>
-              #{query.id.slice(0, 8)}
-            </span>
-            <span className="text-xs" style={{ color: '#475569' }}>
-              Rd {query.current_round}
-            </span>
-            <span className="text-xs" style={{ color: '#475569' }}>
-              {query.response_count ?? 0} resp
-            </span>
-            <div className="ml-auto flex items-center gap-1.5">
-              <span className="text-xs font-mono font-bold" style={{ color: '#818cf8' }}>
-                {query.reward} MON
-              </span>
-              <span className="text-xs" style={{ color: '#334155' }}>
-                {fmtTime(query.created_at)}
-              </span>
-            </div>
-          </div>
-
-          {/* Problem text */}
-          <p className="text-sm leading-relaxed line-clamp-2" style={{ color: '#cbd5e1' }}>
-            {query.problem}
-          </p>
-
-          {/* Winner */}
-          {query.winner_address && (
-            <p className="text-xs font-mono" style={{ color: '#10b981' }}>
-              ★ Winner: {fmtAddr(query.winner_address)}
-            </p>
-          )}
-        </div>
-
-        {expanded ? (
-          <ChevronUp className="w-4 h-4 shrink-0 mt-1" style={{ color: '#475569' }} />
-        ) : (
-          <ChevronDown className="w-4 h-4 shrink-0 mt-1" style={{ color: '#475569' }} />
+        <span style={{ flex: 1, fontWeight: 500 }}>{name}</span>
+        {isWinner && (
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--green)",
+              fontFamily: "var(--mono)",
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+            }}
+          >
+            WINNER
+          </span>
         )}
-      </button>
-
-      {expanded && (
-        <div style={{ borderTop: '1px solid rgba(99,102,241,0.1)', background: 'rgba(0,0,0,0.2)' }}>
-          {/* Full problem */}
-          <div className="p-4 pb-0">
-            <p className="text-xs font-mono mb-1" style={{ color: '#475569' }}>FULL PROBLEM</p>
-            <p className="text-sm leading-relaxed mb-4" style={{ color: '#e2e8f0' }}>{query.problem}</p>
-
-            {/* Explorer link if settled */}
-            {query.status === 'settled' && query.winner_address && (
-              <a
-                href={`${EXPLORER_URL}/address/${query.winner_address}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg mb-4"
+        <ScoreBar score={r.score} />
+        <span style={{ fontSize: 10, color: "var(--text-3)", marginLeft: 4 }}>
+          {open ? "▲" : "▼"}
+        </span>
+      </div>
+      {open && (
+        <div className="response-body">
+          {r.reasoning && (
+            <div style={{ marginBottom: 10 }}>
+              <div
                 style={{
-                  background: 'rgba(16,185,129,0.1)',
-                  color: '#10b981',
-                  border: '1px solid rgba(16,185,129,0.25)',
+                  fontSize: 10,
+                  color: "var(--text-3)",
+                  marginBottom: 4,
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
                 }}
               >
-                <ExternalLink className="w-3 h-3" />
-                View winner on Monad Explorer
-              </a>
-            )}
+                Reasoning
+              </div>
+              <div style={{ color: "var(--text-2)" }}>{r.reasoning}</div>
+            </div>
+          )}
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--text-3)",
+              marginBottom: 4,
+              fontWeight: 500,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            Response
           </div>
-
-          {/* Memory timeline */}
-          <div className="px-2">
-            <p className="text-xs font-mono px-2 mb-2" style={{ color: '#475569' }}>MEMORY CHAIN</p>
-            <MemoryPanel queryId={query.id} />
-          </div>
+          <div style={{ color: "var(--text-1)" }}>{r.response_text}</div>
+          {r.score_reasoning && (
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-3)",
+                  marginBottom: 4,
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                Judge notes
+              </div>
+              <div style={{ color: "var(--text-2)" }}>{r.score_reasoning}</div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── Create Query Modal ────────────────────────────────────────
-const CAPABILITIES = ['coding', 'math', 'research', 'analysis', 'writing', 'blockchain', 'general'];
+/* ─── Memory timeline ──────────────────────────────────────────────── */
+function MemoryTimeline({ memory }: { memory: Record<string, unknown> | undefined }) {
+  const events = (memory?.events as Array<Record<string, unknown>>) ?? [];
+  if (events.length === 0) {
+    return (
+      <p style={{ fontSize: 12, color: "var(--text-3)" }}>No events recorded yet.</p>
+    );
+  }
+  return (
+    <div className="timeline" role="list">
+      {events.map((ev, i) => {
+        const type = (ev.type as string) ?? "event";
+        const ts = ev.timestamp as string | undefined;
+        const parts = [
+          ev.agent_address ? `agent:${shortAddr(ev.agent_address as string)}` : null,
+          ev.round !== undefined ? `rd${ev.round}` : null,
+          ev.status ? `→ ${ev.status}` : null,
+          ev.winner_address ? `winner:${shortAddr(ev.winner_address as string)}` : null,
+          typeof ev.score === "number"
+            ? `score:${(ev.score as number).toFixed(2)}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <div key={i} className="timeline-item" role="listitem">
+            <div className="timeline-dot" />
+            <div className="timeline-content">
+              <div className="timeline-type">{type}</div>
+              {parts && <div className="timeline-meta">{parts}</div>}
+              {ts && <div className="timeline-meta">{fmtTime(ts)}</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-function CreateQueryModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [problem, setProblem] = useState('');
-  const [bounty, setBounty] = useState('0.05');
-  const [caps, setCaps] = useState<string[]>([]);
+/* ─── Query detail ─────────────────────────────────────────────────── */
+function QueryDetail({
+  query,
+  loading,
+}: {
+  query: Query | null;
+  loading: boolean;
+}) {
+  const [activeRound, setActiveRound] = useState(1);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (query) setActiveRound(query.round);
+  }, [query?.id]);
+
+  useEffect(() => {
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(
+        (process.env.NEXT_PUBLIC_WS_URL as string) ?? "ws://localhost:8000/ws"
+      );
+      ws.onmessage = (e) => {
+        const line = typeof e.data === "string" ? e.data : JSON.stringify(e.data);
+        setLogs((prev) => [...prev.slice(-199), line]);
+        setTimeout(() => {
+          logRef.current?.scrollTo(0, logRef.current.scrollHeight);
+        }, 10);
+      };
+    } catch {}
+    return () => ws?.close();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="detail-scroll" style={{ padding: 16 }}>
+        {[80, 92, 70].map((w, i) => (
+          <div
+            key={i}
+            className="skeleton"
+            style={{ height: 13, marginBottom: 12, width: `${w}%` }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (!query) {
+    return (
+      <div className="detail-placeholder">
+        <div>
+          <div style={{ fontSize: 20, marginBottom: 6, textAlign: "center" }}>←</div>
+          <div>Select a query to view details</div>
+        </div>
+      </div>
+    );
+  }
+
+  const responses = query.responses ?? [];
+  const rounds = Array.from(new Set(responses.map((r) => r.round))).sort((a, b) => a - b);
+  const roundResponses = responses.filter((r) => r.round === activeRound);
+
+  const agentNames = new Map<string, string>();
+  responses.forEach((r) => agentNames.set(r.agent_address, shortAddr(r.agent_address)));
+
+  function logClass(line: string): string {
+    const l = line.toLowerCase();
+    if (l.includes("[alpha]")) return "log-line alpha";
+    if (l.includes("[gamma]")) return "log-line gamma";
+    if (l.includes("[beta]")) return "log-line beta";
+    if (l.includes("[judge]")) return "log-line judge";
+    if (l.includes("error")) return "log-line error";
+    return "log-line orch";
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {/* Header */}
+      <div className="detail-header">
+        <div className="detail-id">{query.id}</div>
+        <div className="detail-meta">
+          <StatusBadge status={query.status} />
+          <span>Round {query.round}</span>
+          <span style={{ color: "var(--text-3)" }}>·</span>
+          <span>{responses.length} response{responses.length !== 1 ? "s" : ""}</span>
+          <span style={{ color: "var(--text-3)" }}>·</span>
+          <span>{timeAgo(query.created_at)}</span>
+        </div>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="detail-scroll">
+        <div className="detail-body">
+
+          {/* Problem statement */}
+          <div className="detail-section">
+            <div className="section-label">Problem</div>
+            <p style={{ fontSize: 13, lineHeight: 1.65 }}>{query.problem}</p>
+          </div>
+
+          {/* Winner */}
+          {query.winner_address && (
+            <div className="detail-section">
+              <div className="section-label">Winner</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--green)" }}>
+                {query.winner_address}
+              </div>
+            </div>
+          )}
+
+          {/* Responses */}
+          {responses.length > 0 && (
+            <div className="detail-section">
+              <div className="section-label">Responses</div>
+              {rounds.length > 1 && (
+                <div className="round-tabs" role="tablist">
+                  {rounds.map((r) => (
+                    <button
+                      key={r}
+                      role="tab"
+                      aria-selected={activeRound === r}
+                      className={`round-tab${activeRound === r ? " active" : ""}`}
+                      onClick={() => setActiveRound(r)}
+                    >
+                      Round {r}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {roundResponses.length === 0 ? (
+                  <p style={{ fontSize: 12, color: "var(--text-3)" }}>
+                    No responses for this round.
+                  </p>
+                ) : (
+                  roundResponses.map((r) => (
+                    <ResponseItem
+                      key={r.id}
+                      r={r}
+                      agentNames={agentNames}
+                      isWinner={r.agent_address === query.winner_address}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Memory timeline */}
+          <div className="detail-section">
+            <div className="section-label">Memory timeline</div>
+            <MemoryTimeline memory={query.memory} />
+          </div>
+
+          {/* Metadata */}
+          <div className="detail-section">
+            <div className="section-label">Metadata</div>
+            <div className="meta-grid">
+              <span className="meta-key">Bounty</span>
+              <span className="meta-val">{query.bounty} MON</span>
+              <span className="meta-key">Capabilities</span>
+              <span className="meta-val">{query.capabilities.join(", ")}</span>
+              <span className="meta-key">Deadline</span>
+              <span className="meta-val">
+                {new Date(query.deadline).toLocaleString([], {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })}
+              </span>
+              <span className="meta-key">Created</span>
+              <span className="meta-val">
+                {new Date(query.created_at).toLocaleString([], {
+                  dateStyle: "short",
+                  timeStyle: "medium",
+                })}
+              </span>
+              {query.memory_hash && (
+                <>
+                  <span className="meta-key">Memory hash</span>
+                  <span className="meta-val">{query.memory_hash.slice(0, 20)}…</span>
+                </>
+              )}
+              {query.tx_hash && (
+                <>
+                  <span className="meta-key">Tx hash</span>
+                  <span className="meta-val">{query.tx_hash.slice(0, 20)}…</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Live log panel */}
+      <div className="log-panel">
+        <div
+          className="log-header"
+          onClick={() => setLogsOpen((v) => !v)}
+          role="button"
+          aria-expanded={logsOpen}
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && setLogsOpen((v) => !v)}
+        >
+          <span className="log-live-dot" />
+          Live logs
+          <span style={{ marginLeft: "auto" }}>{logsOpen ? "▲" : "▼"}</span>
+        </div>
+        {logsOpen && (
+          <div
+            className="log-body"
+            ref={logRef}
+            role="log"
+            aria-live="polite"
+          >
+            {logs.length === 0 ? (
+              <span className="log-line" style={{ color: "var(--text-3)" }}>
+                Waiting for events…
+              </span>
+            ) : (
+              logs.map((l, i) => (
+                <div key={i} className={logClass(l)}>
+                  {l}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── New query modal ──────────────────────────────────────────────── */
+function NewQueryModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
+  const [problem, setProblem] = useState("");
+  const [caps, setCaps] = useState<string[]>(["general"]);
+  const [bounty, setBounty] = useState("0");
+  const [deadline, setDeadline] = useState(10);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  function toggleCap(c: string) {
+    setCaps((prev) =>
+      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
+    );
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!problem.trim()) return;
+    if (problem.trim().length < 10) {
+      setError("Problem must be at least 10 characters.");
+      return;
+    }
+    if (caps.length === 0) {
+      setError("Select at least one capability.");
+      return;
+    }
     setLoading(true);
-    setErr('');
+    setError(null);
     try {
-      await api.createQuery(problem.trim(), bounty);
-      onCreated();
-      onClose();
-    } catch (ex) {
-      setErr(String(ex));
+      const res = await api.createQuery({
+        problem: problem.trim(),
+        capabilities: caps,
+        bounty,
+        deadline_minutes: deadline,
+      });
+      onCreated(res.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit query.");
     } finally {
       setLoading(false);
     }
   }
 
+  const canSubmit = problem.trim().length >= 10 && caps.length > 0;
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="New query"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div
-        className="w-full max-w-lg rounded-2xl overflow-hidden"
-        style={{
-          background: 'var(--bg-card)',
-          border: '1px solid rgba(99,102,241,0.25)',
-          boxShadow: '0 0 60px rgba(99,102,241,0.15)',
-        }}
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4"
-          style={{ borderBottom: '1px solid rgba(99,102,241,0.1)' }}
-        >
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5" style={{ color: '#818cf8' }} />
-            <h2 className="font-bold" style={{ color: '#f1f5f9' }}>New Query</h2>
-          </div>
-          <button onClick={onClose} className="hover:opacity-70 transition-opacity">
-            <X className="w-5 h-5" style={{ color: '#64748b' }} />
+      <div className="modal">
+        <div className="modal-header">
+          <span>New query</span>
+          <button
+            className="btn"
+            style={{ padding: "2px 8px", fontSize: 11 }}
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
           </button>
         </div>
-
-        {/* Form */}
-        <form onSubmit={submit} className="p-6 space-y-4">
-          <div>
-            <label className="text-xs font-mono mb-1.5 block" style={{ color: '#64748b' }}>
-              PROBLEM STATEMENT
-            </label>
-            <textarea
-              value={problem}
-              onChange={(e) => setProblem(e.target.value)}
-              placeholder="Describe the problem you want agents to solve…"
-              className="w-full rounded-xl p-4 text-sm resize-none focus:outline-none transition-colors"
-              style={{
-                background: 'rgba(0,0,0,0.3)',
-                border: '1px solid rgba(99,102,241,0.15)',
-                color: '#e2e8f0',
-                height: 120,
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)';
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(99,102,241,0.15)';
-              }}
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-mono mb-1.5 block" style={{ color: '#64748b' }}>
-              CAPABILITIES REQUIRED
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {CAPABILITIES.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() =>
-                    setCaps((prev) =>
-                      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
-                    )
-                  }
-                  className="px-3 py-1 rounded-full text-xs font-mono transition-all"
-                  style={{
-                    background: caps.includes(c) ? 'rgba(99,102,241,0.25)' : 'rgba(0,0,0,0.3)',
-                    border: `1px solid ${caps.includes(c) ? 'rgba(99,102,241,0.5)' : 'rgba(99,102,241,0.15)'}`,
-                    color: caps.includes(c) ? '#818cf8' : '#64748b',
-                  }}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-mono mb-1.5 block" style={{ color: '#64748b' }}>
-              BOUNTY (MON)
-            </label>
-            <div
-              className="flex items-center gap-2 rounded-xl px-4 py-2.5"
-              style={{
-                background: 'rgba(0,0,0,0.3)',
-                border: '1px solid rgba(99,102,241,0.15)',
-              }}
-            >
-              <input
-                type="number"
-                value={bounty}
-                onChange={(e) => setBounty(e.target.value)}
-                min="0.001"
-                step="0.01"
-                className="bg-transparent text-sm font-mono focus:outline-none flex-1"
-                style={{ color: '#e2e8f0' }}
+        <form onSubmit={submit}>
+          <div className="modal-body">
+            <div className="field">
+              <label className="field-label" htmlFor="problem">
+                Problem statement
+              </label>
+              <textarea
+                id="problem"
+                className="input"
+                placeholder="Describe the problem concisely. Be specific about what you need."
+                value={problem}
+                onChange={(e) => setProblem(e.target.value)}
+                rows={5}
+                required
               />
-              <span className="text-sm font-bold" style={{ color: '#818cf8' }}>MON</span>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: problem.length < 10 ? "var(--text-3)" : "var(--green)",
+                  textAlign: "right",
+                }}
+              >
+                {problem.length} / 10 min chars
+              </span>
             </div>
+
+            <div className="field">
+              <span className="field-label">Capabilities required</span>
+              <div className="cap-filters">
+                {CAPABILITIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`tag${caps.includes(c) ? " selected" : ""}`}
+                    onClick={() => toggleCap(c)}
+                    aria-pressed={caps.includes(c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="field">
+                <label className="field-label" htmlFor="bounty">
+                  Bounty (MON)
+                </label>
+                <input
+                  id="bounty"
+                  type="number"
+                  className="input"
+                  value={bounty}
+                  onChange={(e) => setBounty(e.target.value)}
+                  min="0"
+                  step="0.001"
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="deadline">
+                  Deadline
+                </label>
+                <select
+                  id="deadline"
+                  className="input"
+                  value={deadline}
+                  onChange={(e) => setDeadline(Number(e.target.value))}
+                >
+                  {[5, 10, 15, 30].map((m) => (
+                    <option key={m} value={m}>
+                      {m} minutes
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  padding: "8px 12px",
+                  background: "var(--red-dim)",
+                  border: "1px solid var(--red)",
+                  borderRadius: "var(--radius)",
+                  fontSize: 12,
+                  color: "var(--red)",
+                }}
+              >
+                {error}
+              </div>
+            )}
           </div>
 
-          {err && (
-            <p className="text-sm px-3 py-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}>
-              {err}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || !problem.trim()}
-            className="btn-primary w-full flex items-center justify-center gap-2 py-3"
-          >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Submitting…
-              </>
-            ) : (
-              <>
-                <Zap className="w-4 h-4" />
-                Post Query
-              </>
-            )}
-          </button>
+          <div className="modal-footer">
+            <button type="button" className="btn" onClick={onClose} disabled={loading}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading || !canSubmit}
+            >
+              {loading ? "Submitting…" : "Submit query"}
+            </button>
+          </div>
         </form>
       </div>
     </div>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────
-const STATUS_FILTERS = ['all', 'routing', 'collecting', 'scoring', 'escalating', 'settled', 'failed'];
-
+/* ─── Main page ────────────────────────────────────────────────────── */
 export default function ExplorePage() {
   const [queries, setQueries] = useState<Query[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [showCreate, setShowCreate] = useState(false);
-  const [newIds, setNewIds] = useState<Set<string>>(new Set());
-  const prevIds = useRef<Set<string>>(new Set());
-  const [logs, setLogs] = useState<string[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Query | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [showNew, setShowNew] = useState(false);
 
   const fetchQueries = useCallback(async () => {
     try {
-      const data = await api.getQueries({ limit: 50 });
-      const incoming = new Set(data.map((q: Query) => q.id));
-      const freshArr = data.map((q: Query) => q.id).filter((id: string) => !prevIds.current.has(id));
-      if (freshArr.length > 0) setNewIds(new Set(freshArr));
-      prevIds.current = incoming;
+      const data = await api.getQueries({
+        status: filter === "all" ? undefined : filter,
+        limit: 50,
+      });
       setQueries(data);
-      setTimeout(() => setNewIds(new Set()), 3000);
+      setListError(null);
     } catch {
-      // api offline - keep previous data
+      setListError("Could not reach orchestrator. Is it running?");
     } finally {
-      setLoading(false);
+      setListLoading(false);
     }
-  }, []);
+  }, [filter]);
 
   useEffect(() => {
+    setListLoading(true);
     fetchQueries();
-    const iv = setInterval(fetchQueries, POLL_INTERVAL);
-    return () => clearInterval(iv);
   }, [fetchQueries]);
 
-  // WebSocket live logs
   useEffect(() => {
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
-    function connect() {
-      try {
-        const ws = new WebSocket(WS_URL);
-        wsRef.current = ws;
-        ws.onopen = () => setWsConnected(true);
-        ws.onclose = () => {
-          setWsConnected(false);
-          setTimeout(connect, 4000);
-        };
-        ws.onerror = () => ws.close();
-        ws.onmessage = (e) => {
-          try {
-            const msg = JSON.parse(e.data);
-            const text = msg.message || msg.data || JSON.stringify(msg);
-            setLogs((prev) => [text, ...prev].slice(0, 80));
-          } catch {
-            setLogs((prev) => [e.data, ...prev].slice(0, 80));
-          }
-        };
-      } catch {}
-    }
-    connect();
-    return () => { wsRef.current?.close(); };
-  }, []);
+    const id = setInterval(fetchQueries, 5000);
+    return () => clearInterval(id);
+  }, [fetchQueries]);
 
-  const filtered = queries.filter((q) => {
-    const matchSearch =
-      !search ||
-      q.problem.toLowerCase().includes(search.toLowerCase()) ||
-      q.status.toLowerCase().includes(search.toLowerCase()) ||
-      q.id.includes(search);
-    const matchStatus = statusFilter === 'all' || q.status.toLowerCase() === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  useEffect(() => {
+    if (!selectedId) { setDetail(null); return; }
+    setDetailLoading(true);
+    api.getQuery(selectedId)
+      .then(setDetail)
+      .catch(() => setDetail(null))
+      .finally(() => setDetailLoading(false));
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !detail) return;
+    if (["SETTLED", "FAILED"].includes(detail.status)) return;
+    const id = setInterval(() => {
+      api.getQuery(selectedId).then(setDetail).catch(() => {});
+    }, 4000);
+    return () => clearInterval(id);
+  }, [selectedId, detail?.status]);
+
+  function handleCreated(id: string) {
+    setShowNew(false);
+    fetchQueries();
+    setSelectedId(id);
+  }
+
+  function statusDot(status: string): string {
+    const s = status.toUpperCase();
+    if (s === "SETTLED") return "var(--green)";
+    if (s === "FAILED") return "var(--red)";
+    if (s === "ESCALATING" || s === "SCORING") return "var(--amber)";
+    if (s === "COLLECTING" || s === "ROUTING") return "var(--blue)";
+    return "var(--text-3)";
+  }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6 flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-black" style={{ color: '#f1f5f9' }}>Explore Queries</h1>
-          <p className="text-sm mt-1" style={{ color: '#475569' }}>
-            Live AI agent task results · auto-refreshing every 3s
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={fetchQueries}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all hover:opacity-80"
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid rgba(99,102,241,0.2)',
-              color: '#94a3b8',
-            }}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
-          </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="btn-primary flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Query
-          </button>
-        </div>
-      </div>
-
-      {/* Status filter tabs */}
-      <div className="flex gap-2 flex-wrap mb-4">
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className="px-3 py-1 rounded-lg text-xs font-mono transition-all capitalize"
-            style={{
-              background: statusFilter === s ? 'rgba(99,102,241,0.2)' : 'var(--bg-card)',
-              border: `1px solid ${statusFilter === s ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.1)'}`,
-              color: statusFilter === s ? '#818cf8' : '#475569',
-            }}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Query List */}
-        <div className="lg:col-span-2 space-y-3">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#475569' }} />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by problem, status, ID…"
-              className="w-full rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none transition-colors"
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid rgba(99,102,241,0.15)',
-                color: '#e2e8f0',
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.4)'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.15)'; }}
-            />
+    <>
+      <div className="explore-layout">
+        {/* ── List panel ── */}
+        <div className="explore-list-panel">
+          <div className="qlist-toolbar">
+            <div style={{ display: "flex", gap: 2, flex: 1, flexWrap: "wrap" }}>
+              {FILTERS.map((f) => (
+                <button
+                  key={f}
+                  className={`filter-tab${filter === f ? " active" : ""}`}
+                  onClick={() => {
+                    setFilter(f);
+                    setListLoading(true);
+                  }}
+                  aria-pressed={filter === f}
+                >
+                  {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowNew(true)}
+              style={{ flexShrink: 0 }}
+            >
+              + New
+            </button>
           </div>
 
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="card p-4 space-y-2">
-                  <div className="skeleton h-4 w-1/3" />
-                  <div className="skeleton h-4 w-full" />
-                  <div className="skeleton h-4 w-2/3" />
-                </div>
-              ))}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-24 card">
-              <div className="text-4xl mb-4">🔍</div>
-              <p className="font-semibold mb-2" style={{ color: '#94a3b8' }}>No queries found</p>
-              <p className="text-sm mb-6" style={{ color: '#475569' }}>
-                {queries.length === 0
-                  ? 'No queries exist yet. Create the first one!'
-                  : 'Try adjusting your search or filter.'}
-              </p>
-              <button onClick={() => setShowCreate(true)} className="btn-primary">
-                Create Query
-              </button>
-            </div>
-          ) : (
-            <>
-              <p className="text-xs font-mono" style={{ color: '#475569' }}>
-                {filtered.length} quer{filtered.length !== 1 ? 'ies' : 'y'}
-              </p>
-              {filtered.map((q) => (
-                <QueryCard key={q.id} query={q} isNew={newIds.has(q.id)} />
-              ))}
-            </>
-          )}
-        </div>
-
-        {/* Live Log Sidebar */}
-        <div
-          className="rounded-2xl overflow-hidden flex flex-col"
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid rgba(99,102,241,0.15)',
-            height: 'calc(100vh - 180px)',
-            position: 'sticky',
-            top: 80,
-          }}
-        >
           <div
-            className="px-4 py-3 flex items-center gap-2 flex-shrink-0"
-            style={{ borderBottom: '1px solid rgba(99,102,241,0.1)' }}
+            style={{
+              padding: "5px 12px",
+              fontSize: 11,
+              color: "var(--text-3)",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--bg-subtle)",
+            }}
           >
-            <div
-              className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400 animate-pulse' : 'bg-red-500'}`}
-            />
-            <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>
-              Live Logs
-            </span>
-            <span className="text-xs ml-auto font-mono" style={{ color: '#475569' }}>
-              {wsConnected ? 'CONNECTED' : 'RECONNECTING'}
-            </span>
+            {listLoading
+              ? "Loading…"
+              : `${queries.length} quer${queries.length !== 1 ? "ies" : "y"}`}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-1 font-mono">
-            {logs.length === 0 ? (
-              <p className="text-xs" style={{ color: '#334155' }}>
-                {wsConnected ? 'Waiting for events…' : 'Connecting to orchestrator…'}
-              </p>
-            ) : (
-              logs.map((log, i) => (
+          <div className="qlist-body" role="list">
+            {listLoading ? (
+              Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
-                  className="text-xs leading-relaxed py-0.5 border-b"
-                  style={{
-                    color: i === 0 ? '#94a3b8' : '#334155',
-                    borderColor: 'rgba(99,102,241,0.05)',
-                    transition: 'color 2s ease',
-                  }}
+                  style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}
                 >
-                  {log.slice(0, 140)}
+                  <div className="skeleton" style={{ height: 10, width: "40%", marginBottom: 8 }} />
+                  <div className="skeleton" style={{ height: 12, width: "90%", marginBottom: 4 }} />
+                  <div className="skeleton" style={{ height: 12, width: "65%" }} />
+                </div>
+              ))
+            ) : listError ? (
+              <div className="empty-state">
+                <h3>Cannot connect</h3>
+                <p>{listError}</p>
+                <button className="btn" style={{ marginTop: 12 }} onClick={fetchQueries}>
+                  Retry
+                </button>
+              </div>
+            ) : queries.length === 0 ? (
+              <div className="empty-state">
+                <h3>No queries</h3>
+                <p>
+                  {filter === "all"
+                    ? "Submit a query to get started."
+                    : `No queries with status "${filter}".`}
+                </p>
+              </div>
+            ) : (
+              queries.map((q) => (
+                <div
+                  key={q.id}
+                  role="listitem"
+                  className={`qlist-item${selectedId === q.id ? " selected" : ""}`}
+                  onClick={() => setSelectedId((p) => (p === q.id ? null : q.id))}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" &&
+                    setSelectedId((p) => (p === q.id ? null : q.id))
+                  }
+                  tabIndex={0}
+                  aria-selected={selectedId === q.id}
+                >
+                  <div className="qlist-item-bar">
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 5,
+                        height: 5,
+                        borderRadius: "50%",
+                        background: statusDot(q.status),
+                        flexShrink: 0,
+                      }}
+                    />
+                    <StatusBadge status={q.status} />
+                    <span>{shortId(q.id)}</span>
+                    <span>·</span>
+                    <span>rd {q.round}</span>
+                    <span>·</span>
+                    <span>{q.response_count ?? 0} resp</span>
+                    <span style={{ marginLeft: "auto" }}>{fmtTime(q.created_at)}</span>
+                  </div>
+                  <div className="qlist-item-problem">{q.problem}</div>
+                  {q.winner_address && (
+                    <div className="qlist-item-winner">
+                      winner:{" "}
+                      <span className="mono">{shortAddr(q.winner_address)}</span>
+                    </div>
+                  )}
                 </div>
               ))
             )}
           </div>
         </div>
+
+        {/* ── Detail panel ── */}
+        <div className="explore-detail-panel">
+          <QueryDetail query={detail} loading={detailLoading} />
+        </div>
       </div>
 
-      {showCreate && (
-        <CreateQueryModal
-          onClose={() => setShowCreate(false)}
-          onCreated={fetchQueries}
-        />
+      {showNew && (
+        <NewQueryModal onClose={() => setShowNew(false)} onCreated={handleCreated} />
       )}
-    </div>
+    </>
   );
 }
