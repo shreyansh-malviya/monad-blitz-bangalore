@@ -19,7 +19,6 @@ const BASE =
   process.env.NEXT_PUBLIC_ORCHESTRATOR_URL ||
   "http://localhost:8000";
 
-const EXPLORER = process.env.NEXT_PUBLIC_EXPLORER_URL || "https://testnet.monadexplorer.com";
 const PROPOSAL_ESCROW = process.env.NEXT_PUBLIC_PROPOSAL_ESCROW_ADDRESS || "0xDF6E43a9081c0E6D466aD8E82caF00881F6b7Bad";
 
 const ROUND_LABEL: Record<string, string> = {
@@ -578,46 +577,22 @@ function ChainInfo({ proposal }: { proposal: Proposal }) {
         {/* ProposalEscrow contract */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontSize: "10px", color: "var(--text-3)", width: 120, flexShrink: 0 }}>Contract</span>
-          <a
-            href={`${EXPLORER}/address/${PROPOSAL_ESCROW}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: "10px", color: "var(--text-2)", fontFamily: "monospace", textDecoration: "none" }}
-          >
+          <code style={{ fontSize: "10px", color: "var(--text-2)", fontFamily: "monospace" }}>
             {PROPOSAL_ESCROW.slice(0, 10)}…{PROPOSAL_ESCROW.slice(-8)}
-          </a>
+          </code>
           <CopyBtn text={PROPOSAL_ESCROW} />
-          <a
-            href={`${EXPLORER}/address/${PROPOSAL_ESCROW}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: "9px", color: "var(--text-3)", textDecoration: "none", marginLeft: 4 }}
-          >
-            ↗ explorer
-          </a>
+          <span style={{ fontSize: "9px", color: "var(--text-3)", marginLeft: 4 }}>devnet · no explorer</span>
         </div>
 
         {/* Settlement tx hash — hide if null or all-zero placeholder */}
         {proposal.tx_hash && !/^0x0+$/.test(proposal.tx_hash) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: "10px", color: "var(--text-3)", width: 120, flexShrink: 0 }}>Settlement Tx</span>
-            <a
-              href={`${EXPLORER}/tx/${proposal.tx_hash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: "10px", color: "var(--green)", fontFamily: "monospace", textDecoration: "none" }}
-            >
+            <code style={{ fontSize: "10px", color: "var(--green)", fontFamily: "monospace" }}>
               {proposal.tx_hash.slice(0, 10)}…{proposal.tx_hash.slice(-8)}
-            </a>
+            </code>
             <CopyBtn text={proposal.tx_hash} />
-            <a
-              href={`${EXPLORER}/tx/${proposal.tx_hash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: "9px", color: "var(--text-3)", textDecoration: "none", marginLeft: 4 }}
-            >
-              ↗ explorer
-            </a>
+            <span style={{ fontSize: "9px", color: "var(--text-3)", marginLeft: 4 }}>devnet · no explorer</span>
           </div>
         )}
       </div>
