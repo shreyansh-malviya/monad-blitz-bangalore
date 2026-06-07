@@ -1,14 +1,18 @@
 """WebSocket route — real-time event stream for CLI and frontend."""
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..main import get_ws_manager
-
 router = APIRouter(tags=["websocket"])
+
+
+def _get_ws_manager():
+    """Lazy import to break circular dependency with main.py."""
+    from ..main import get_ws_manager
+    return get_ws_manager()
 
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    manager = get_ws_manager()
+    manager = _get_ws_manager()
     await manager.connect(ws)
     try:
         while True:

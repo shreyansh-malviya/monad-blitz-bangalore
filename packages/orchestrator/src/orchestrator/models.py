@@ -34,7 +34,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 # ── Base ───────────────────────────────────────────────────────────────────────
 
 class Base(DeclarativeBase):
-    pass
+    __allow_unmapped__ = True
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────

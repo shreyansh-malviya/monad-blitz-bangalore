@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_chain_client.listen_for_events(_handle_chain_event))
 
     logger.info(
-        "✓ Orchestrator ready — listening on "
+        "Orchestrator ready — listening on "
         f"http://{settings.ORCHESTRATOR_HOST}:{settings.ORCHESTRATOR_PORT}"
     )
 
@@ -142,10 +142,12 @@ app.add_middleware(
 from .routes.queries import router as queries_router
 from .routes.agents import router as agents_router
 from .routes.websocket import router as ws_router
+from .routes.leaderboard import router as leaderboard_router
 
 app.include_router(queries_router)
 app.include_router(agents_router)
 app.include_router(ws_router)
+app.include_router(leaderboard_router)
 
 
 @app.get("/health")
