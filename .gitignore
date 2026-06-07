@@ -1,53 +1,62 @@
-# Environment
+# ── Secrets & environment ──────────────────────────────────────────────────────
 .env
 .env.local
 .env.*.local
+wallets.json
 
-# Python
+# ── Python ─────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 .venv/
 venv/
+env/
 *.egg-info/
 dist/
 build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+*.pth
 
-# Node
+# ── Node ───────────────────────────────────────────────────────────────────────
 node_modules/
 .pnpm-store/
 .turbo/
 packages/web/.next/
 packages/web/out/
+packages/web/.vercel/
 
-# Foundry
+# ── Foundry ────────────────────────────────────────────────────────────────────
 packages/contracts/out/
 packages/contracts/cache/
 packages/contracts/broadcast/
 
-# Logs
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Deployment
-deployments.json
-
-# Rough work
-rough/
-
-# Dev databases and artifacts
+# ── Dev databases ──────────────────────────────────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
-.playwright-mcp/
-monadblitz-*.png
-packages/web/tsconfig.tsbuildinfo
 
+# ── Vector store ───────────────────────────────────────────────────────────────
+.chroma/
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+*.log
+logs/
+test-users/
+
+# ── OS ─────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Screenshots / images ───────────────────────────────────────────────────────
 *.png
+*.jpg
+*.jpeg
+.playwright-mcp/
+
+# ── Misc ───────────────────────────────────────────────────────────────────────
+deployments.json
+rough/
+packages/web/tsconfig.tsbuildinfo
