@@ -15,6 +15,7 @@ import {
   explorerAddr,
   explorerTx,
 } from "@/lib/api";
+import { Markdown } from "@/lib/Markdown";
 
 const BASE =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -262,13 +263,10 @@ function MessageBubble({ msg }: { msg: DiscussionMessage }) {
           padding: "10px 12px",
           background: "var(--bg-subtle)",
           borderRadius: "var(--radius-sm)",
-          fontSize: "13px",
-          lineHeight: 1.65,
-          color: "var(--text-1)",
           border: "1px solid var(--border)",
         }}
       >
-        {msg.content}
+        <Markdown content={msg.content} />
       </div>
     </div>
   );
@@ -442,19 +440,7 @@ function FinalReport({ proposal }: { proposal: Proposal }) {
             Claude Sonnet is synthesizing the discussion into a structured report…
           </div>
         ) : report ? (
-          <pre
-            style={{
-              fontSize: "13px",
-              lineHeight: 1.7,
-              color: "var(--text-1)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              fontFamily: "inherit",
-              margin: 0,
-            }}
-          >
-            {report}
-          </pre>
+          <Markdown content={report} />
         ) : (
           <div style={{ fontSize: "12px", color: "var(--text-3)" }}>Report not available.</div>
         )}

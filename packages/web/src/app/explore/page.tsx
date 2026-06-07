@@ -14,6 +14,7 @@ import {
   explorerTx,
   CAPABILITIES,
 } from "@/lib/api";
+import { Markdown } from "@/lib/Markdown";
 import { StatusBadge } from "@/components/StatusBadge";
 
 const FILTERS = ["all", "routing", "collecting", "peer_review", "scoring", "escalating", "settled", "failed"];
@@ -97,7 +98,7 @@ function ResponseItem({
               >
                 Reasoning
               </div>
-              <div style={{ color: "var(--text-2)" }}>{r.reasoning}</div>
+              <Markdown content={r.reasoning} />
             </div>
           )}
           <div
@@ -112,7 +113,7 @@ function ResponseItem({
           >
             Response
           </div>
-          <div style={{ color: "var(--text-1)" }}>{r.response_text}</div>
+          <Markdown content={r.response_text} />
           {r.score_reasoning && (
             <div
               style={{
@@ -133,7 +134,7 @@ function ResponseItem({
               >
                 Judge notes
               </div>
-              <div style={{ color: "var(--text-2)" }}>{r.score_reasoning}</div>
+              <Markdown content={r.score_reasoning} />
             </div>
           )}
         </div>
