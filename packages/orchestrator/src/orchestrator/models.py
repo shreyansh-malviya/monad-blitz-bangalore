@@ -7,6 +7,10 @@ Tables:
   responses         — agent responses per round
   task_memories     — rolling memory per query (full history)
   orchestrator_events — audit log of all orchestrator actions
+  proposals         — proposal-track tasks (idea/startup/governance)
+  proposal_roles    — roles required for a proposal (CEO, CTO, etc.)
+  proposal_bids     — agent bids to fill a role
+  discussion_messages — structured multi-round discussion messages
 """
 
 from __future__ import annotations
@@ -38,6 +42,17 @@ class Base(DeclarativeBase):
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
+
+class ProposalStatus(str, enum.Enum):
+    CREATED = "CREATED"
+    ROLE_DISCOVERY = "ROLE_DISCOVERY"
+    BIDDING = "BIDDING"
+    TEAM_FORMED = "TEAM_FORMED"
+    DISCUSSING = "DISCUSSING"
+    SYNTHESIZING = "SYNTHESIZING"
+    SETTLED = "SETTLED"
+    FAILED = "FAILED"
+
 
 class QueryStatus(str, enum.Enum):
     CREATED = "CREATED"
@@ -254,3 +269,102 @@ class SubQueryResponse(Base):
 
     def __repr__(self) -> str:
         return f"<SubQueryResponse agent={self.agent_address[:8]}... sq={self.sub_query_id[:8]}...>"
+
+
+# ── Proposal Track ─────────────────────────────────────────────────────────────
+
+class Proposal(Base):
+    """A proposal submitted to the marketplace for structured multi-agent discussion."""
+
+    __tablename__ = "proposals"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    domain = Column(String(100), nullable=True, comment="Detected domain: tech_startup, social_app, etc.")
+    status = Column(
+        SAEnum(ProposalStatus, name="proposalstatus"),
+        default=ProposalStatus.CREATED,
+        nullable=False,
+    )
+    bounty = Column(String(32), default="0", comment="Bounty in wei as string")
+    requester = Column(String(42), default="0x0000000000000000000000000000000000000000")
+    max_roles = Column(Integer, default=5, nullable=False)
+    lock_time = Column(Integer, default=60, comment="Seconds to lock proposal before bidding")
+    proposal_time = Column(Integer, default=30, comment="Seconds for bidding phase")
+    evaluation_time = Column(Integer, default=300, comment="Seconds for discussion + synthesis")
+    chain_proposal_id = Column(BigInteger, nullable=True)
+    roles_decided = Column(JSON, default=list, comment="List of {name, description} objects")
+    final_report = Column(Text, nullable=True, comment="Synthesized Markdown report")
+    report_ipfs_hash = Column(String(100), nullable=True, comment="IPFS CID of the final report")
+    report_hash = Column(String(66), nullable=True, comment="SHA256 of report, anchored on Monad")
+    tx_hash = Column(String(66), nullable=True, comment="Settlement tx hash")
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    roles: list["ProposalRole"] = relationship("ProposalRole", back_populates="proposal", cascade="all, delete-orphan")
+    bids: list["ProposalBid"] = relationship("ProposalBid", back_populates="proposal", cascade="all, delete-orphan")
+    messages: list["DiscussionMessage"] = relationship("DiscussionMessage", back_populates="proposal", cascade="all, delete-orphan")
+
+    def __repr__(self) -> str:
+        return f"<Proposal {self.id[:8]}... status={self.status} roles={self.max_roles}>"
+
+
+class ProposalRole(Base):
+    """A role required for a proposal (e.g. CEO, CTO, Investor)."""
+
+    __tablename__ = "proposal_roles"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    proposal_id = Column(String(36), ForeignKey("proposals.id"), nullable=False)
+    role_name = Column(String(100), nullable=False)
+    role_description = Column(Text, default="")
+    agent_address = Column(String(42), nullable=True, comment="Assigned agent (null until team formed)")
+    agent_name = Column(String(100), nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+
+    proposal: "Proposal" = relationship("Proposal", back_populates="roles")
+
+    def __repr__(self) -> str:
+        return f"<ProposalRole {self.role_name} agent={self.agent_address}>"
+
+
+class ProposalBid(Base):
+    """An agent's bid to fill a specific role in a proposal."""
+
+    __tablename__ = "proposal_bids"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    proposal_id = Column(String(36), ForeignKey("proposals.id"), nullable=False)
+    agent_address = Column(String(42), ForeignKey("agents.address"), nullable=False)
+    agent_name = Column(String(100), default="")
+    role_name = Column(String(100), nullable=False)
+    fit_score = Column(Float, nullable=False, comment="Self-assessed fit 0.0-1.0")
+    reasoning = Column(Text, default="")
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+    proposal: "Proposal" = relationship("Proposal", back_populates="bids")
+
+    def __repr__(self) -> str:
+        return f"<ProposalBid {self.agent_address[:8]}... role={self.role_name} fit={self.fit_score}>"
+
+
+class DiscussionMessage(Base):
+    """A single message in the structured multi-round proposal discussion."""
+
+    __tablename__ = "discussion_messages"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    proposal_id = Column(String(36), ForeignKey("proposals.id"), nullable=False)
+    agent_address = Column(String(42), nullable=False)
+    agent_name = Column(String(100), default="")
+    role_name = Column(String(100), nullable=False)
+    round_num = Column(Integer, nullable=False, comment="1=initial 2=response 3=recommendation")
+    round_type = Column(String(30), default="initial", comment="initial|response|recommendation")
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+    proposal: "Proposal" = relationship("Proposal", back_populates="messages")
+
+    def __repr__(self) -> str:
+        return f"<DiscussionMessage round={self.round_num} role={self.role_name} agent={self.agent_address[:8]}...>"

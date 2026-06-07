@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract ReputationManager is Ownable {
     address public escrowContract;
+    mapping(address => bool) public authorizedCallers;
 
     struct AgentScore {
         uint256 score;        // 0-10000 (100 = 1.00)
@@ -26,7 +27,10 @@ contract ReputationManager is Ownable {
     event AgentInitialized(address indexed agent, uint256 initialScore);
 
     modifier onlyEscrow() {
-        require(msg.sender == escrowContract, "ReputationManager: only escrow");
+        require(
+            msg.sender == escrowContract || authorizedCallers[msg.sender],
+            "ReputationManager: only escrow"
+        );
         _;
     }
 
@@ -34,6 +38,15 @@ contract ReputationManager is Ownable {
 
     function setEscrowContract(address _escrow) external onlyOwner {
         escrowContract = _escrow;
+        authorizedCallers[_escrow] = true;
+    }
+
+    function addAuthorizedCaller(address caller) external onlyOwner {
+        authorizedCallers[caller] = true;
+    }
+
+    function removeAuthorizedCaller(address caller) external onlyOwner {
+        authorizedCallers[caller] = false;
     }
 
     function initializeAgent(address agent) external onlyEscrow {

@@ -127,6 +127,53 @@ class Settings(BaseSettings):
         description="Private key for the orchestrator's on-chain signer",
     )
 
+    # ── Proposal Track ─────────────────────────────────────────────────────
+    PROPOSAL_BIDDING_TIMEOUT: int = Field(
+        default=25,
+        description="Seconds agents have to submit bids for proposal roles",
+    )
+    PROPOSAL_DISCUSSION_TIMEOUT: int = Field(
+        default=60,
+        description="Seconds per discussion round for agents to respond",
+    )
+    PROPOSAL_MAX_ROLES: int = Field(
+        default=6,
+        description="Hard cap on roles per proposal (user can set lower)",
+    )
+    PROPOSAL_DISCUSSION_ROUNDS: int = Field(
+        default=3,
+        description="Number of structured discussion rounds (initial/response/recommendation)",
+    )
+
+    # ── IPFS / Pinata ──────────────────────────────────────────────────────
+    PINATA_API_KEY: str = Field(default="", description="Pinata API key for IPFS uploads")
+    PINATA_SECRET_KEY: str = Field(default="", description="Pinata secret API key")
+    PINATA_JWT: str = Field(default="", description="Pinata JWT (preferred over API key)")
+
+    # ── Multi-node Networking ──────────────────────────────────────────────
+    NODE_MODE: str = Field(
+        default="local",
+        description="local (Redis pubsub) | network (HTTP peer-to-peer)",
+    )
+    NODE_ENDPOINT: str = Field(
+        default="",
+        description="This node's public HTTP endpoint for peer-to-peer (e.g. http://192.168.1.5:8000)",
+    )
+    BOOTSTRAP_NODES: str = Field(
+        default="",
+        description="Comma-separated list of peer node endpoints for network mode",
+    )
+    MDNS_ENABLED: bool = Field(
+        default=True,
+        description="Enable mDNS discovery for WiFi-local nodes",
+    )
+
+    # ── Contract Addresses (Proposal) ──────────────────────────────────────
+    PROPOSAL_ESCROW_ADDRESS: str = Field(
+        default="0x0000000000000000000000000000000000000000",
+        description="ProposalEscrow contract address",
+    )
+
     @field_validator("ESCALATION_THRESHOLD")
     @classmethod
     def _validate_threshold(cls, v: float) -> float:
@@ -145,6 +192,21 @@ class Settings(BaseSettings):
     def contracts_deployed(self) -> bool:
         zero = "0x0000000000000000000000000000000000000000"
         return self.QUERY_ESCROW_ADDRESS != zero
+
+    @property
+    def proposal_contracts_deployed(self) -> bool:
+        zero = "0x0000000000000000000000000000000000000000"
+        return self.PROPOSAL_ESCROW_ADDRESS != zero
+
+    @property
+    def bootstrap_node_list(self) -> list[str]:
+        if not self.BOOTSTRAP_NODES:
+            return []
+        return [n.strip() for n in self.BOOTSTRAP_NODES.split(",") if n.strip()]
+
+    @property
+    def ipfs_available(self) -> bool:
+        return bool(self.PINATA_JWT or (self.PINATA_API_KEY and self.PINATA_SECRET_KEY))
 
 
 # Singleton instance used across the application

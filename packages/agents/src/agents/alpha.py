@@ -46,10 +46,26 @@ Be strict but fair. A score of 0.7+ means the answer is genuinely good.
 Return ONLY a JSON array, no other text."""
 
 
+ALPHA_PROPOSAL_SYSTEM = """You are Alpha, an elite AI agent playing a specific expert role in a structured panel discussion.
+
+Speak ONLY from the perspective of your assigned role. Be specific, insightful, and critical where warranted.
+Keep your contribution to 150-250 words. Be direct and avoid generic statements."""
+
+ALPHA_BID_SYSTEM = """You are evaluating whether you, as an AI agent with broad expertise, would be a good fit
+for a specific expert role in a panel discussion about a proposal.
+
+Score your fit from 0.0 (no fit) to 1.0 (perfect fit). Be honest and realistic.
+Return ONLY a JSON object: {"fit_score": 0.85, "reasoning": "brief explanation"}"""
+
+
 class AlphaAgent(BaseAgent):
     name = "Alpha"
     capabilities = ["general", "code", "solidity", "analysis", "math", "nlp", "reasoning"]
     tier = "alpha"
+    potential_roles = [
+        "CEO", "CTO", "Product Manager", "Technical Lead", "Investor",
+        "Analyst", "Researcher", "Strategist", "Architect",
+    ]
 
     def __init__(self, private_key: str = None):
         super().__init__(private_key or settings.ALPHA_PRIVATE_KEY)
@@ -84,6 +100,103 @@ class AlphaAgent(BaseAgent):
             f"[Alpha] Generated response — confidence: {result['confidence']:.2f}"
         )
         return result
+
+    async def bid_for_roles(
+        self,
+        proposal_id: str,
+        title: str,
+        description: str,
+        roles: list[dict],
+    ) -> list[dict]:
+        """Use Claude Haiku to assess fit for each role."""
+        import json, re
+
+        bids = []
+        # Only bid for roles that match our potential roles
+        target_roles = [
+            r for r in roles
+            if any(pr.lower() in r["name"].lower() or r["name"].lower() in pr.lower()
+                   for pr in self.potential_roles)
+        ]
+        if not target_roles:
+            target_roles = roles[:2]  # bid for top 2 if no match
+
+        for role in target_roles:
+            prompt = (
+                f"Proposal: {title}\n\n"
+                f"Description: {description[:500]}\n\n"
+                f"Role to evaluate: {role['name']}\n"
+                f"Role description: {role.get('description', '')}\n\n"
+                f"My capabilities: {', '.join(self.capabilities)}\n\n"
+                "How well do I fit this role? Score 0.0-1.0 and explain briefly."
+            )
+            try:
+                message = await self.client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=150,
+                    system=ALPHA_BID_SYSTEM,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = message.content[0].text.strip()
+                match = re.search(r"\{[\s\S]*\}", raw)
+                if match:
+                    result = json.loads(match.group())
+                    fit_score = max(0.0, min(1.0, float(result.get("fit_score", 0.6))))
+                    bids.append({
+                        "role_name": role["name"],
+                        "fit_score": fit_score,
+                        "reasoning": result.get("reasoning", ""),
+                    })
+            except Exception as e:
+                logger.debug(f"[Alpha] Bid assessment error for {role['name']}: {e}")
+                bids.append({
+                    "role_name": role["name"],
+                    "fit_score": 0.6,
+                    "reasoning": "General expertise applicable.",
+                })
+
+        logger.info(f"[Alpha] Submitting {len(bids)} bid(s) for proposal #{proposal_id[:8]}")
+        return bids
+
+    async def discuss_as_role(
+        self,
+        proposal_id: str,
+        role_name: str,
+        round_num: int,
+        round_type: str,
+        previous_messages: list[dict],
+    ) -> str:
+        """Generate a substantive discussion contribution using Claude Sonnet."""
+        prev_text = "\n\n".join(
+            f"[Round {m['round_num']} — {m['role_name']}]: {m['content']}"
+            for m in previous_messages
+        ) if previous_messages else "(No prior discussion)"
+
+        round_instructions = {
+            "initial": f"Give your primary perspective as {role_name}. What's your initial take on this proposal?",
+            "response": f"As {role_name}, respond to 2-3 specific points made by other roles. Be direct.",
+            "recommendation": f"As {role_name}, give your final verdict: GO, CONDITIONAL GO, or NO-GO, and why.",
+        }
+        instruction = round_instructions.get(round_type, round_instructions["initial"])
+
+        prompt = (
+            f"You are participating as {role_name}.\n\n"
+            f"Previous discussion:\n{prev_text}\n\n"
+            f"Task: {instruction}\n\n"
+            "Write 150-250 words. Be specific and substantive."
+        )
+
+        try:
+            message = await self.client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=400,
+                system=ALPHA_PROPOSAL_SYSTEM.replace("{role_name}", role_name),
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return message.content[0].text.strip()
+        except Exception as e:
+            logger.warning(f"[Alpha] Discussion generation error: {e}")
+            return ""
 
     async def peer_review_responses(
         self, query_id: str, responses: list[dict]

@@ -70,6 +70,8 @@ async function fetchAPI<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export { fetchAPI };
+
 export const api = {
   // Queries
   getQueries: (params?: { status?: string; limit?: number; capability?: string }) => {
@@ -108,6 +110,46 @@ export const api = {
   getLeaderboard: () => fetchAPI<LeaderboardAgent[]>("/api/agents/leaderboard"),
 
   getAgent: (address: string) => fetchAPI<Agent>(`/api/agents/${address}`),
+
+  // Proposals
+  getProposals: (params?: { status?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status && params.status !== "all") qs.set("status", params.status.toUpperCase());
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return fetchAPI<Proposal[]>(`/api/proposals/${q ? "?" + q : ""}`);
+  },
+
+  getProposal: (id: string) => fetchAPI<Proposal>(`/api/proposals/${id}`),
+
+  createProposal: (params: {
+    title: string;
+    description: string;
+    max_roles?: number;
+    bounty?: string;
+    requester?: string;
+    lock_time?: number;
+    proposal_time?: number;
+    evaluation_time?: number;
+  }) =>
+    fetchAPI<{ id: string; status: string; message: string }>("/api/proposals/", {
+      method: "POST",
+      body: JSON.stringify({
+        title: params.title,
+        description: params.description,
+        max_roles: params.max_roles ?? 4,
+        bounty: params.bounty ?? "0",
+        requester: params.requester ?? "0x0000000000000000000000000000000000000000",
+        lock_time: params.lock_time ?? 60,
+        proposal_time: params.proposal_time ?? 30,
+        evaluation_time: params.evaluation_time ?? 300,
+      }),
+    }),
+
+  getProposalReport: (id: string) =>
+    fetchAPI<{ report: string; report_ipfs_hash: string; ipfs_url: string | null }>(
+      `/api/proposals/${id}/report`
+    ),
 };
 
 // Helpers
@@ -156,4 +198,84 @@ export const TIER_LABEL: Record<string, string> = {
   alpha: "α Alpha",
   beta: "β Beta",
   gamma: "γ Gamma",
+};
+
+// ── Proposal types ────────────────────────────────────────────────────────────
+
+export interface ProposalRole {
+  id: string;
+  role_name: string;
+  role_description: string;
+  agent_address: string | null;
+  agent_name: string | null;
+  assigned_at: string | null;
+}
+
+export interface ProposalBid {
+  id: string;
+  agent_address: string;
+  agent_name: string;
+  role_name: string;
+  fit_score: number;
+  reasoning: string;
+  created_at: string;
+}
+
+export interface DiscussionMessage {
+  id: string;
+  agent_address: string;
+  agent_name: string;
+  role_name: string;
+  round_num: number;
+  round_type: string;
+  content: string;
+  created_at: string;
+}
+
+export interface Proposal {
+  id: string;
+  title: string;
+  description: string;
+  domain: string | null;
+  status: string;
+  bounty: string;
+  requester: string;
+  max_roles: number;
+  lock_time: number;
+  proposal_time: number;
+  evaluation_time: number;
+  chain_proposal_id: number | null;
+  roles_decided: Array<{ name: string; description: string }>;
+  final_report: string | null;
+  report_ipfs_hash: string | null;
+  report_hash: string | null;
+  tx_hash: string | null;
+  created_at: string;
+  updated_at: string;
+  roles: ProposalRole[];
+  bids: ProposalBid[];
+  messages: DiscussionMessage[];
+}
+
+
+export const PROPOSAL_STATUS_LABEL: Record<string, string> = {
+  CREATED: "Created",
+  ROLE_DISCOVERY: "Discovering roles",
+  BIDDING: "Bidding",
+  TEAM_FORMED: "Team formed",
+  DISCUSSING: "Discussing",
+  SYNTHESIZING: "Synthesizing",
+  SETTLED: "Settled",
+  FAILED: "Failed",
+};
+
+export const PROPOSAL_STATUS_DOT: Record<string, string> = {
+  CREATED: "#6b7280",
+  ROLE_DISCOVERY: "#836EF9",
+  BIDDING: "#f59e0b",
+  TEAM_FORMED: "#3b82f6",
+  DISCUSSING: "#8b5cf6",
+  SYNTHESIZING: "#10b981",
+  SETTLED: "var(--green)",
+  FAILED: "var(--red)",
 };

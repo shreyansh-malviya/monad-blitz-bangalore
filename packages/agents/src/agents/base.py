@@ -1,5 +1,5 @@
 """
-Base agent class for MonadBlitz AI agent nodes.
+Base agent class for MindMesh AI agent nodes.
 
 Each agent:
 1. Registers itself with the orchestrator on startup
@@ -7,6 +7,11 @@ Each agent:
 3. Reads full shared task memory before responding
 4. Calls its LLM to generate a structured response
 5. Submits response back to orchestrator via HTTP
+
+Proposal track additions:
+- Listens on `proposals:broadcast` channel
+- Bids for roles in proposals (bid_for_role)
+- Participates in multi-round structured discussions (discuss_as_role)
 """
 import asyncio
 import hashlib
@@ -30,6 +35,8 @@ class BaseAgent(ABC):
     name: str = "BaseAgent"
     capabilities: list[str] = ["general"]
     tier: str = "beta"
+    # Roles this agent can play in proposals — override in subclasses
+    potential_roles: list[str] = ["Analyst", "Advisor"]
 
     def __init__(self, private_key: Optional[str] = None):
         self.private_key = private_key or "0x" + "0" * 63 + "1"
@@ -53,7 +60,7 @@ class BaseAgent(ABC):
         pubsub = redis_client.pubsub()
 
         channels = (
-            ["queries:all", "sub_queries:broadcast"]
+            ["queries:all", "sub_queries:broadcast", "proposals:broadcast"]
             + [f"queries:{cap}" for cap in self.capabilities]
         )
         await pubsub.subscribe(*channels)
@@ -74,6 +81,12 @@ class BaseAgent(ABC):
                     asyncio.create_task(self._handle_sub_query(data))
                 elif isinstance(channel, str) and channel.startswith("peer_review:"):
                     asyncio.create_task(self._handle_peer_review_request(data))
+                elif channel == "proposals:broadcast":
+                    msg_type_inner = data.get("type", "")
+                    if msg_type_inner == "proposal_bid_request":
+                        asyncio.create_task(self._handle_proposal_bid(data))
+                    elif msg_type_inner == "proposal_discuss":
+                        asyncio.create_task(self._handle_proposal_discuss(data))
                 else:
                     asyncio.create_task(self._handle_query(data))
             except json.JSONDecodeError:
@@ -362,6 +375,170 @@ class BaseAgent(ABC):
         Default: no-op (skips peer review for this agent).
         """
         return []
+
+    # ── Proposal Track ────────────────────────────────────────────────────────
+
+    async def _handle_proposal_bid(self, data: dict) -> None:
+        """Receive a proposal bid request and submit bids for matching roles."""
+        proposal_id = data.get("proposal_id")
+        title = data.get("title", "")
+        description = data.get("description", "")
+        roles = data.get("roles", [])
+
+        if not proposal_id or not roles:
+            return
+
+        self.logger.info(
+            f"[{self.name}] Proposal bid request #{proposal_id[:8]}: {title[:50]}"
+        )
+
+        # Ask subclass which roles it can play and with what confidence
+        try:
+            bids = await asyncio.wait_for(
+                self.bid_for_roles(proposal_id, title, description, roles),
+                timeout=min(getattr(settings, "RESPONSE_TIMEOUT", 60), 20),
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            self.logger.warning(f"[{self.name}] Bid generation failed: {e}")
+            return
+
+        if not bids:
+            return
+
+        for bid in bids:
+            payload = {
+                "agent_address": self.address,
+                "agent_name": self.name,
+                "role_name": bid["role_name"],
+                "fit_score": max(0.0, min(1.0, float(bid.get("fit_score", 0.5)))),
+                "reasoning": bid.get("reasoning", ""),
+            }
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{settings.ORCHESTRATOR_BASE_URL}/api/proposals/{proposal_id}/bid",
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status in (200, 201):
+                            self.logger.info(
+                                f"[{self.name}] Bid submitted: {bid['role_name']} "
+                                f"(fit={bid.get('fit_score', 0):.2f})"
+                            )
+                        else:
+                            body = await resp.text()
+                            self.logger.debug(
+                                f"[{self.name}] Bid rejected {resp.status}: {body[:100]}"
+                            )
+            except Exception as e:
+                self.logger.debug(f"[{self.name}] Bid submit error: {e}")
+
+    async def _handle_proposal_discuss(self, data: dict) -> None:
+        """Receive a discussion round request and submit a message if assigned to a role."""
+        proposal_id = data.get("proposal_id")
+        round_num = data.get("round_num", 1)
+        round_type = data.get("round_type", "initial")
+        total_rounds = data.get("total_rounds", 3)
+        team = data.get("team", {})  # {role_name: agent_address}
+        prev_messages = data.get("previous_messages", [])
+
+        if not proposal_id:
+            return
+
+        # Find our assigned role
+        my_role = None
+        for role_name, agent_addr in team.items():
+            if agent_addr.lower() == self.address.lower():
+                my_role = role_name
+                break
+
+        if not my_role:
+            return  # not in this team
+
+        self.logger.info(
+            f"[{self.name}] Discussion round {round_num}/{total_rounds} "
+            f"as {my_role} for #{proposal_id[:8]}"
+        )
+
+        try:
+            content = await asyncio.wait_for(
+                self.discuss_as_role(proposal_id, my_role, round_num, round_type, prev_messages),
+                timeout=min(getattr(settings, "RESPONSE_TIMEOUT", 60), 50),
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            self.logger.warning(f"[{self.name}] Discussion generation failed: {e}")
+            return
+
+        if not content or not content.strip():
+            return
+
+        payload = {
+            "agent_address": self.address,
+            "agent_name": self.name,
+            "role_name": my_role,
+            "round_num": round_num,
+            "round_type": round_type,
+            "content": content.strip(),
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{settings.ORCHESTRATOR_BASE_URL}/api/proposals/{proposal_id}/discuss",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status in (200, 201):
+                        self.logger.info(
+                            f"[{self.name}] Discussion message submitted "
+                            f"(round {round_num}, role={my_role})"
+                        )
+                    else:
+                        body = await resp.text()
+                        self.logger.debug(
+                            f"[{self.name}] Discuss rejected {resp.status}: {body[:100]}"
+                        )
+        except Exception as e:
+            self.logger.debug(f"[{self.name}] Discuss submit error: {e}")
+
+    async def bid_for_roles(
+        self,
+        proposal_id: str,
+        title: str,
+        description: str,
+        roles: list[dict],
+    ) -> list[dict]:
+        """
+        Evaluate which roles this agent can fill and return bids.
+        Override in subclasses for LLM-based bidding.
+
+        Must return: [{"role_name": str, "fit_score": float, "reasoning": str}]
+        Default: bid for all potential_roles with a fixed 0.5 score.
+        """
+        available_role_names = {r["name"] for r in roles}
+        return [
+            {
+                "role_name": role,
+                "fit_score": 0.5,
+                "reasoning": f"{self.name} can cover {role} with general expertise.",
+            }
+            for role in self.potential_roles
+            if role in available_role_names
+        ]
+
+    async def discuss_as_role(
+        self,
+        proposal_id: str,
+        role_name: str,
+        round_num: int,
+        round_type: str,
+        previous_messages: list[dict],
+    ) -> str:
+        """
+        Generate a discussion message from the perspective of the assigned role.
+        Override in subclasses for LLM-based generation.
+        Default: generic placeholder.
+        """
+        return f"[{self.name} as {role_name}]: Participating in round {round_num} discussion."
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const NAV = [
-  { href: "/explore", label: "Explore" },
+  { href: "/proposals", label: "Proposals" },
+  { href: "/explore", label: "Queries" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/dashboard", label: "Dashboard" },
 ];
@@ -26,7 +27,7 @@ export function Navbar() {
             strokeLinejoin="round"
           />
         </svg>
-        MonadBlitz
+        MindMesh
       </Link>
 
       {NAV.map(({ href, label }) => {
