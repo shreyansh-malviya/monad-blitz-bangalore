@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: mindmesh-api
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/dev_all.py --no-beta
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MONAD_RPC_URL
+        sync: false
+      - key: CHAIN_ID
+        value: "143"
+      - key: DEPLOYER_PRIVATE_KEY
+        sync: false
+      - key: ALPHA_PRIVATE_KEY
+        sync: false
+      - key: BETA_PRIVATE_KEY
+        sync: false
+      - key: GAMMA_PRIVATE_KEY
+        sync: false
+      - key: AGENT_REGISTRY_ADDRESS
+        value: "0x41A6d28d32e3ce52bEDea4e58DB2a0eFc5b38D5D"
+      - key: QUERY_ESCROW_ADDRESS
+        value: "0x0e2353154D142319456b4220078BD2c41DeA1b3A"
+      - key: REPUTATION_MANAGER_ADDRESS
+        value: "0x26086EE64B2061dB73D01087072AaECC8c016dE7"
+      - key: DECISION_LEDGER_ADDRESS
+        value: "0xFD36B5b0e710Ef0942E5B0F191A7419147D8698a"
+      - key: STAKE_VAULT_ADDRESS
+        value: "0xB341b79696E5b115e4334A729a9Fbae256f7FA06"
+      - key: PROPOSAL_ESCROW_ADDRESS
+        value: "0xDF6E43a9081c0E6D466aD8E82caF00881F6b7Bad"
+      - key: ESCALATION_THRESHOLD
+        value: "0.75"
+      - key: MAX_ROUNDS
+        value: "3"
+      - key: ROUND_TIMEOUT_SECONDS
+        value: "90"
+      - key: PROPOSAL_BIDDING_TIMEOUT
+        value: "25"
+      - key: PROPOSAL_DISCUSSION_TIMEOUT
+        value: "60"
+      - key: PROPOSAL_MAX_ROLES
+        value: "6"
+      - key: PROPOSAL_DISCUSSION_ROUNDS
+        value: "3"
+      - key: JWT_SECRET
+        sync: false
+      - key: PINATA_JWT
+        sync: false

@@ -38,15 +38,12 @@ help:
 
 # ── Install ────────────────────────────────────────────────────────────────────
 
-install: install-orchestrator install-agents install-cli
+install:
+	pip install -r requirements.txt
 
-install-orchestrator:
+install-dev:
 	cd packages/orchestrator && uv pip install -e .
-
-install-agents:
 	cd packages/agents && uv pip install -e .
-
-install-cli:
 	cd packages/cli && uv pip install -e .
 
 install-contracts:

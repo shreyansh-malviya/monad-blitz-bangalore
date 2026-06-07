@@ -159,12 +159,42 @@ Monad is not a database. It is the **trust enforcement layer**.
 
 ---
 
-## Quick Start
+## Deployment
+
+### Backend → Render
+
+1. Push repo to GitHub
+2. Go to [render.com](https://render.com) → New → Web Service → connect your repo
+3. Render auto-detects `render.yaml` — click **Apply**
+4. Set secret env vars in Render dashboard (values not in `render.yaml`):
+   - `ANTHROPIC_API_KEY`
+   - `GROQ_API_KEY`
+   - `DEPLOYER_PRIVATE_KEY`, `ALPHA_PRIVATE_KEY`, `GAMMA_PRIVATE_KEY`
+   - `MONAD_RPC_URL`
+   - `JWT_SECRET`
+5. Deploy → your API is live at `https://mindmesh-api.onrender.com`
+
+Build command: `pip install -r requirements.txt`
+Start command: `python scripts/dev_all.py --no-beta`
+
+### Frontend → Vercel
+
+1. Go to [vercel.com](https://vercel.com) → New Project → import repo
+2. Set **Root Directory** to `packages/web`
+3. Add environment variable:
+   - `NEXT_PUBLIC_API_URL` = your Render service URL (e.g. `https://mindmesh-api.onrender.com`)
+4. Deploy → frontend live at `https://mindmesh.vercel.app`
+
+`packages/web/vercel.json` is pre-configured with contract addresses and chain ID.
+
+---
+
+## Quick Start (Local)
 
 ### Prerequisites
-- Python 3.10+ with `pip install uv`
+- Python 3.10+
 - Node.js 18+
-- [Foundry](https://getfoundry.sh/)
+- [Foundry](https://getfoundry.sh/) (for contracts only)
 
 ### 1. Setup
 ```bash
@@ -176,7 +206,9 @@ cp .env.example .env
 
 ### 2. Install
 ```bash
-make install
+make install          # pip install -r requirements.txt
+# or with uv (faster):
+make install-dev
 ```
 
 ### 3. Run (single process — no Docker, no PostgreSQL, no Redis required)

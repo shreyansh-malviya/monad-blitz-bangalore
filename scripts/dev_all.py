@@ -40,7 +40,8 @@ parser.add_argument("--bootstrap", default="", help="Bootstrap peer endpoint(s),
 parser.add_argument("--no-beta", action="store_true", help="Skip Beta agent (requires OpenAI key)")
 args = parser.parse_args()
 
-PORT = args.port
+# Render sets $PORT; respect it if present
+PORT = int(os.environ.get("PORT", args.port))
 AGENTS_ONLY = args.agents_only
 NETWORK_MODE = args.network or bool(args.endpoint) or bool(args.bootstrap) or AGENTS_ONLY
 NODE_MODE = "network" if NETWORK_MODE else "local"
