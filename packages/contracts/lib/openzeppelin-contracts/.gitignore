@@ -2,7 +2,8 @@
 *.swo
 
 # Logs
-logs
+*.logs
+test-users/logs.txt
 *.log
 
 # Runtime data
