@@ -184,7 +184,7 @@ class QueryStateMachine:
         if best.score < settings.ESCALATION_THRESHOLD and query.round < settings.MAX_ROUNDS:
             await self._escalate(query_id, query, best.score)
         else:
-            await self._resolve(query_id, query, best)
+            await self._resolve(query_id, query, best, responses)
 
     # ── Escalation ────────────────────────────────────────────────────────────
 
@@ -228,7 +228,7 @@ class QueryStateMachine:
 
     # ── Resolution ────────────────────────────────────────────────────────────
 
-    async def _resolve(self, query_id: str, query: Query, best) -> None:
+    async def _resolve(self, query_id: str, query: Query, best, responses: list) -> None:
         await self._transition(query_id, QueryStatus.RESOLVING)
 
         await self._log(

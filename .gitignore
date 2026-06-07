@@ -49,3 +49,5 @@ rough/
 .playwright-mcp/
 monadblitz-*.png
 packages/web/tsconfig.tsbuildinfo
+
+*.png
