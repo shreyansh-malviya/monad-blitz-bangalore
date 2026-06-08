@@ -368,3 +368,105 @@ class DiscussionMessage(Base):
 
     def __repr__(self) -> str:
         return f"<DiscussionMessage round={self.round_num} role={self.role_name} agent={self.agent_address[:8]}...>"
+
+
+# ── Freelance Track ────────────────────────────────────────────────────────────
+
+class FreelanceStatus(str, enum.Enum):
+    CREATED       = "CREATED"
+    TEAM_DISCOVERY = "TEAM_DISCOVERY"
+    TEAM_FORMED   = "TEAM_FORMED"
+    IN_PROGRESS   = "IN_PROGRESS"
+    ASSEMBLING    = "ASSEMBLING"
+    REVIEW        = "REVIEW"
+    SETTLED       = "SETTLED"
+    FAILED        = "FAILED"
+    DISPUTED      = "DISPUTED"
+
+
+class FreelanceTask(Base):
+    """A real-work task posted to the freelance marketplace."""
+
+    __tablename__ = "freelance_tasks"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    task_type = Column(String(50), default="general",
+                       comment="code | document | research | design | analysis | general")
+    skills_required = Column(JSON, default=list, comment="e.g. ['python','solidity','react']")
+    budget = Column(String(32), default="0", comment="Budget in wei as string")
+    requester = Column(String(42), default="0x0000000000000000000000000000000000000000")
+    status = Column(
+        SAEnum(FreelanceStatus, name="freelancestatus"),
+        default=FreelanceStatus.CREATED,
+        nullable=False,
+    )
+    chain_task_id = Column(BigInteger, nullable=True, comment="On-chain task ID if contract deployed")
+    # Team: JSON list of {agent_address, agent_name, role, subtask_description}
+    team = Column(JSON, default=list)
+    # Assembled deliverable (assembled from all artifacts)
+    deliverable = Column(Text, nullable=True, comment="Assembled final deliverable Markdown")
+    deliverable_ipfs_hash = Column(String(100), nullable=True)
+    deliverable_hash = Column(String(66), nullable=True, comment="SHA-256 of deliverable")
+    review_score = Column(Float, nullable=True, comment="LLM review quality 0.0–1.0")
+    review_notes = Column(Text, nullable=True)
+    tx_hash = Column(String(66), nullable=True, comment="Settlement tx hash on Monad")
+    deadline = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    bids: list["FreelanceBid"] = relationship(
+        "FreelanceBid", back_populates="task", cascade="all, delete-orphan"
+    )
+    artifacts: list["FreelanceArtifact"] = relationship(
+        "FreelanceArtifact", back_populates="task", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<FreelanceTask {self.id[:8]}... '{self.title[:30]}' status={self.status}>"
+
+
+class FreelanceBid(Base):
+    """An agent's bid to take on a subtask role in a freelance task."""
+
+    __tablename__ = "freelance_bids"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    task_id = Column(String(36), ForeignKey("freelance_tasks.id"), nullable=False)
+    agent_address = Column(String(42), nullable=False)
+    agent_name = Column(String(100), default="")
+    proposed_role = Column(String(100), nullable=False, comment="e.g. 'Lead Developer', 'Technical Writer'")
+    proposed_subtask = Column(Text, nullable=False, comment="What this agent will deliver")
+    fit_score = Column(Float, nullable=False, comment="Self-assessed fit 0.0–1.0")
+    reasoning = Column(Text, default="")
+    accepted = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+    task: "FreelanceTask" = relationship("FreelanceTask", back_populates="bids")
+
+    def __repr__(self) -> str:
+        return f"<FreelanceBid agent={self.agent_name} role={self.proposed_role} fit={self.fit_score}>"
+
+
+class FreelanceArtifact(Base):
+    """A deliverable artifact submitted by one agent for their assigned subtask."""
+
+    __tablename__ = "freelance_artifacts"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    task_id = Column(String(36), ForeignKey("freelance_tasks.id"), nullable=False)
+    agent_address = Column(String(42), nullable=False)
+    agent_name = Column(String(100), default="")
+    role = Column(String(100), nullable=False)
+    subtask_description = Column(Text, default="")
+    content = Column(Text, nullable=False, comment="The actual deliverable content (code, doc, spec, etc.)")
+    content_type = Column(String(50), default="markdown", comment="markdown | code | json")
+    ipfs_hash = Column(String(100), nullable=True, comment="IPFS CID if uploaded")
+    quality_score = Column(Float, nullable=True, comment="LLM quality assessment 0.0–1.0")
+    submitted_at = Column(DateTime, default=_now, nullable=False)
+
+    task: "FreelanceTask" = relationship("FreelanceTask", back_populates="artifacts")
+
+    def __repr__(self) -> str:
+        return f"<FreelanceArtifact agent={self.agent_name} role={self.role} len={len(self.content)}>"

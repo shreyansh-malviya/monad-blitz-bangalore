@@ -51,6 +51,36 @@ ALPHA_PROPOSAL_SYSTEM = """You are Alpha, an elite AI agent playing a specific e
 Speak ONLY from the perspective of your assigned role. Be specific, insightful, and critical where warranted.
 Keep your contribution to 150-250 words. Be direct and avoid generic statements."""
 
+ALPHA_FREELANCE_BID_SYSTEM = """You are Alpha, a senior technical AI agent evaluating a freelance task opportunity.
+
+Assess whether you can contribute meaningfully based on your capabilities:
+deep expertise in code architecture, Solidity/EVM, system design, algorithms, security
+analysis, technical documentation, and AI/ML reasoning.
+
+Propose ONE specific role and a detailed subtask plan you will deliver.
+
+Return ONLY a JSON object:
+{
+  "proposed_role": "e.g. Senior Technical Lead",
+  "proposed_subtask": "Specific 2-3 sentence description of exactly what artifact you will produce",
+  "fit_score": 0.85,
+  "reasoning": "Why you are the right agent for this specific task"
+}
+
+If the task is non-technical (pure marketing/HR), be honest and set fit_score below 0.4."""
+
+ALPHA_FREELANCE_ARTIFACT_SYSTEM = """You are Alpha, a senior technical AI agent delivering a freelance task artifact.
+
+You have been assigned a specific role and subtask. Produce a high-quality, complete deliverable.
+
+Your output must be:
+- Complete and immediately usable (no placeholders like "TODO" or "...")
+- Well-structured with clear headings/sections
+- Technically deep and accurate
+- In the requested format (code blocks for code, Markdown for docs)
+
+Output ONLY the deliverable content itself — no preamble, no wrapper text."""
+
 ALPHA_BID_SYSTEM = """You are evaluating whether you, as an AI agent with broad expertise, would be a good fit
 for a specific expert role in a panel discussion about a proposal.
 
@@ -197,6 +227,80 @@ class AlphaAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"[Alpha] Discussion generation error: {e}")
             return ""
+
+    async def generate_freelance_bid(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        task_type: str,
+        skills_required: list,
+    ) -> dict:
+        import json, re
+        skills_str = ", ".join(skills_required) if skills_required else "none specified"
+        prompt = (
+            f"Task ID: {task_id}\nTitle: {title}\nType: {task_type}\n"
+            f"Skills required: {skills_str}\n\nDescription:\n{description[:1500]}"
+        )
+        try:
+            message = await self.client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=300,
+                system=ALPHA_FREELANCE_BID_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = message.content[0].text.strip()
+            match = re.search(r"\{[\s\S]*\}", raw)
+            if match:
+                result = json.loads(match.group())
+                return {
+                    "proposed_role": str(result.get("proposed_role", "Technical Lead")),
+                    "proposed_subtask": str(result.get("proposed_subtask", "")),
+                    "fit_score": max(0.0, min(1.0, float(result.get("fit_score", 0.7)))),
+                    "reasoning": str(result.get("reasoning", "")),
+                }
+        except Exception as e:
+            logger.warning(f"[Alpha] Freelance bid error: {e}")
+        return {
+            "proposed_role": "Technical Lead",
+            "proposed_subtask": f"Provide technical architecture and implementation for: {title}",
+            "fit_score": 0.7,
+            "reasoning": "Broad technical expertise applicable.",
+        }
+
+    async def generate_artifact(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        role: str,
+        subtask: str,
+    ) -> dict:
+        prompt = (
+            f"You are acting as: {role}\n\n"
+            f"Task title: {title}\nYour specific subtask: {subtask}\n\n"
+            f"Full task description:\n{description[:2000]}\n\n"
+            "Deliver your complete artifact now."
+        )
+        try:
+            message = await self.client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=3000,
+                system=ALPHA_FREELANCE_ARTIFACT_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            content = message.content[0].text.strip()
+            ct = "code" if any(
+                kw in subtask.lower()
+                for kw in ["code", "solidity", "contract", "script", "implement", "function"]
+            ) else "markdown"
+            return {"content": content, "content_type": ct}
+        except Exception as e:
+            logger.warning(f"[Alpha] Artifact generation error: {e}")
+            return {
+                "content": f"# {role} Deliverable\n\nGeneration error: {e}",
+                "content_type": "markdown",
+            }
 
     async def peer_review_responses(
         self, query_id: str, responses: list[dict]

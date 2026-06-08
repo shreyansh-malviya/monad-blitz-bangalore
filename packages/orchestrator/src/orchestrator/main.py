@@ -17,6 +17,7 @@ from .chain_client import ChainClient
 from .chain_store import init_chain_store
 from .config import settings
 from .database import create_tables
+from .freelance_state_machine import init_freelance_machine
 from .judge import MetaLLMJudge
 from .memory_service import MemoryService
 from .proposal_state_machine import ProposalStateMachine
@@ -41,6 +42,7 @@ _router: QueryRouter | None = None
 _orchestrator: QueryStateMachine | None = None
 _proposal_orchestrator: ProposalStateMachine | None = None
 _ws_manager: WebSocketManager | None = None
+_freelance_machine = None
 
 
 def get_redis() -> aioredis.Redis:
@@ -126,6 +128,14 @@ async def lifespan(app: FastAPI):
         chain_client=_chain_client,
     )
 
+    # Freelance track state machine
+    _freelance_machine = init_freelance_machine(
+        redis_client=_redis,
+        ws_manager=_ws_manager,
+        chain_client=_chain_client,
+    )
+    logger.info("✓ FreelanceStateMachine ready")
+
     logger.info(f"✓ Escalation threshold: {settings.ESCALATION_THRESHOLD}")
     logger.info(f"✓ Max rounds: {settings.MAX_ROUNDS}")
     logger.info(f"✓ Proposal bidding timeout: {settings.PROPOSAL_BIDDING_TIMEOUT}s")
@@ -186,12 +196,14 @@ from .routes.agents import router as agents_router
 from .routes.websocket import router as ws_router
 from .routes.leaderboard import router as leaderboard_router
 from .routes.proposals import router as proposals_router
+from .routes.freelance import router as freelance_router
 
 app.include_router(queries_router)
 app.include_router(agents_router)
 app.include_router(ws_router)
 app.include_router(leaderboard_router)
 app.include_router(proposals_router)
+app.include_router(freelance_router)
 
 
 @app.get("/health")
@@ -202,6 +214,7 @@ async def health():
         "version": "2.0.0",
         "contracts_deployed": settings.contracts_deployed,
         "proposal_contracts_deployed": settings.proposal_contracts_deployed,
+        "freelance_contracts_deployed": settings.freelance_contracts_deployed,
         "ipfs_available": settings.ipfs_available,
         "node_mode": settings.NODE_MODE,
         "escalation_threshold": settings.ESCALATION_THRESHOLD,

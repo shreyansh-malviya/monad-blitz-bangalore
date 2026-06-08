@@ -150,6 +150,53 @@ export const api = {
     fetchAPI<{ report: string; report_ipfs_hash: string; ipfs_url: string | null }>(
       `/api/proposals/${id}/report`
     ),
+
+  // Freelance
+  getFreelanceTasks: (params?: { status?: string; task_type?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status && params.status !== "all") qs.set("status", params.status.toUpperCase());
+    if (params?.task_type) qs.set("task_type", params.task_type);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return fetchAPI<FreelanceTask[]>(`/api/freelance/${q ? "?" + q : ""}`);
+  },
+
+  getFreelanceTask: (id: string) =>
+    fetchAPI<FreelanceTask>(`/api/freelance/${id}`),
+
+  createFreelanceTask: (params: {
+    title: string;
+    description: string;
+    task_type?: string;
+    skills_required?: string[];
+    budget?: string;
+    requester?: string;
+    deadline_minutes?: number;
+  }) =>
+    fetchAPI<{ id: string; status: string; message: string }>("/api/freelance/", {
+      method: "POST",
+      body: JSON.stringify({
+        title: params.title,
+        description: params.description,
+        task_type: params.task_type ?? "general",
+        skills_required: params.skills_required ?? [],
+        budget: params.budget ?? "0",
+        requester: params.requester ?? "0x0000000000000000000000000000000000000000",
+        deadline_minutes: params.deadline_minutes ?? 30,
+      }),
+    }),
+
+  getFreelanceReport: (id: string) =>
+    fetchAPI<{
+      task_id: string;
+      deliverable: string;
+      deliverable_hash: string;
+      ipfs_hash: string | null;
+      ipfs_url: string | null;
+      review_score: number | null;
+      review_notes: string | null;
+      status: string;
+    }>(`/api/freelance/${id}/report`),
 };
 
 // ── Explorer links ────────────────────────────────────────────────────────────
@@ -271,6 +318,92 @@ export interface Proposal {
   messages: DiscussionMessage[];
 }
 
+
+// ── Freelance types ───────────────────────────────────────────────────────────
+
+export interface FreelanceBid {
+  id: string;
+  agent_address: string;
+  agent_name: string;
+  proposed_role: string;
+  proposed_subtask: string;
+  fit_score: number;
+  reasoning: string;
+  accepted: boolean;
+  created_at: string;
+}
+
+export interface FreelanceArtifact {
+  id: string;
+  agent_address: string;
+  agent_name: string;
+  role: string;
+  subtask_description: string;
+  content: string;
+  content_type: string;
+  ipfs_hash: string | null;
+  quality_score: number | null;
+  submitted_at: string;
+}
+
+export interface FreelanceTask {
+  id: string;
+  title: string;
+  description: string;
+  task_type: string;
+  skills_required: string[];
+  budget: string;
+  requester: string;
+  status: string;
+  chain_task_id: number | null;
+  team: Array<{ address: string; role: string; weight: number }>;
+  deliverable: string | null;
+  deliverable_ipfs_hash: string | null;
+  deliverable_hash: string | null;
+  review_score: number | null;
+  review_notes: string | null;
+  tx_hash: string | null;
+  deadline: string | null;
+  created_at: string;
+  updated_at: string;
+  bid_count: number;
+  artifact_count: number;
+  bids?: FreelanceBid[];
+  artifacts?: FreelanceArtifact[];
+}
+
+export const FREELANCE_STATUS_LABEL: Record<string, string> = {
+  CREATED: "Created",
+  TEAM_DISCOVERY: "Finding team",
+  TEAM_FORMED: "Team formed",
+  IN_PROGRESS: "In progress",
+  ASSEMBLING: "Assembling",
+  REVIEW: "Review",
+  SETTLED: "Settled",
+  FAILED: "Failed",
+  DISPUTED: "Disputed",
+};
+
+export const FREELANCE_STATUS_DOT: Record<string, string> = {
+  CREATED: "#6b7280",
+  TEAM_DISCOVERY: "#836EF9",
+  TEAM_FORMED: "#3b82f6",
+  IN_PROGRESS: "#f59e0b",
+  ASSEMBLING: "#8b5cf6",
+  REVIEW: "#06b6d4",
+  SETTLED: "var(--green)",
+  FAILED: "var(--red)",
+  DISPUTED: "#ef4444",
+};
+
+export const TASK_TYPE_LABEL: Record<string, string> = {
+  code: "Code",
+  document: "Document",
+  research: "Research",
+  design: "Design",
+  analysis: "Analysis",
+  general: "General",
+};
 
 export const PROPOSAL_STATUS_LABEL: Record<string, string> = {
   CREATED: "Created",

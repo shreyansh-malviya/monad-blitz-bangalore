@@ -60,7 +60,7 @@ class BaseAgent(ABC):
         pubsub = redis_client.pubsub()
 
         channels = (
-            ["queries:all", "sub_queries:broadcast", "proposals:broadcast"]
+            ["queries:all", "sub_queries:broadcast", "proposals:broadcast", "freelance:broadcast"]
             + [f"queries:{cap}" for cap in self.capabilities]
         )
         await pubsub.subscribe(*channels)
@@ -87,6 +87,12 @@ class BaseAgent(ABC):
                         asyncio.create_task(self._handle_proposal_bid(data))
                     elif msg_type_inner == "proposal_discuss":
                         asyncio.create_task(self._handle_proposal_discuss(data))
+                elif channel == "freelance:broadcast":
+                    msg_type_inner = data.get("type", "")
+                    if msg_type_inner == "freelance_task":
+                        asyncio.create_task(self._handle_freelance_task(data))
+                    elif msg_type_inner == "freelance_assigned":
+                        asyncio.create_task(self._handle_freelance_assigned(data))
                 else:
                     asyncio.create_task(self._handle_query(data))
             except json.JSONDecodeError:
@@ -539,6 +545,175 @@ class BaseAgent(ABC):
         Default: generic placeholder.
         """
         return f"[{self.name} as {role_name}]: Participating in round {round_num} discussion."
+
+    # ── Freelance Track ───────────────────────────────────────────────────────
+
+    async def _handle_freelance_task(self, data: dict) -> None:
+        """New freelance task broadcast — decide whether to bid."""
+        task_id = data.get("task_id")
+        title = data.get("title", "")
+        description = data.get("description", "")
+        task_type = data.get("task_type", "general")
+        skills = data.get("skills_required", [])
+
+        if not task_id or not title:
+            return
+
+        self.logger.info(f"[{self.name}] Freelance task #{task_id[:8]}: {title[:60]}")
+
+        try:
+            bid = await asyncio.wait_for(
+                self.generate_freelance_bid(task_id, title, description, task_type, skills),
+                timeout=min(getattr(settings, "RESPONSE_TIMEOUT", 60), 20),
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            self.logger.warning(f"[{self.name}] Freelance bid generation failed: {e}")
+            return
+
+        if not bid or bid.get("fit_score", 0) < 0.4:
+            self.logger.info(f"[{self.name}] Skipping freelance #{task_id[:8]} — low fit")
+            return
+
+        payload = {
+            "agent_address": self.address,
+            "agent_name": self.name,
+            "proposed_role": bid.get("proposed_role", f"{self.name} Contributor"),
+            "proposed_subtask": bid.get("proposed_subtask", "General contribution"),
+            "fit_score": max(0.0, min(1.0, float(bid.get("fit_score", 0.5)))),
+            "reasoning": bid.get("reasoning", ""),
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{settings.ORCHESTRATOR_BASE_URL}/api/freelance/{task_id}/bid",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status in (200, 201):
+                        self.logger.info(
+                            f"[{self.name}] Freelance bid submitted: {payload['proposed_role']} "
+                            f"(fit={payload['fit_score']:.2f})"
+                        )
+                    else:
+                        body = await resp.text()
+                        self.logger.debug(f"[{self.name}] Freelance bid rejected {resp.status}: {body[:100]}")
+        except Exception as e:
+            self.logger.debug(f"[{self.name}] Freelance bid submit error: {e}")
+
+    async def _handle_freelance_assigned(self, data: dict) -> None:
+        """We've been assigned a subtask — generate and submit the artifact."""
+        task_id = data.get("task_id")
+        assigned_agent = data.get("agent_address", "")
+        role = data.get("role", "")
+        subtask = data.get("subtask_description", "")
+
+        # Only act on our own assignment
+        if assigned_agent.lower() != self.address.lower():
+            return
+
+        if not task_id:
+            return
+
+        self.logger.info(f"[{self.name}] Assigned freelance role '{role}' on #{task_id[:8]}")
+
+        # Fetch full task description for context
+        task_description = ""
+        task_title = ""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{settings.ORCHESTRATOR_BASE_URL}/api/freelance/{task_id}",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        t = await resp.json()
+                        task_title = t.get("title", "")
+                        task_description = t.get("description", "")
+        except Exception:
+            pass
+
+        try:
+            artifact = await asyncio.wait_for(
+                self.generate_artifact(task_id, task_title, task_description, role, subtask),
+                timeout=min(getattr(settings, "RESPONSE_TIMEOUT", 60), 90),
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            self.logger.error(f"[{self.name}] Artifact generation failed: {e}", exc_info=True)
+            return
+
+        if not artifact or not artifact.get("content"):
+            return
+
+        payload = {
+            "agent_address": self.address,
+            "agent_name": self.name,
+            "role": role,
+            "subtask_description": subtask,
+            "content": artifact["content"],
+            "content_type": artifact.get("content_type", "markdown"),
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{settings.ORCHESTRATOR_BASE_URL}/api/freelance/{task_id}/submit",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status in (200, 201):
+                        self.logger.info(
+                            f"[{self.name}] Artifact submitted for #{task_id[:8]} ({len(artifact['content'])} chars) ✓"
+                        )
+                    else:
+                        body = await resp.text()
+                        self.logger.error(f"[{self.name}] Artifact submit failed {resp.status}: {body[:200]}")
+        except Exception as e:
+            self.logger.error(f"[{self.name}] Artifact submit error: {e}")
+
+    async def generate_freelance_bid(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        task_type: str,
+        skills_required: list[str],
+    ) -> dict:
+        """
+        Decide whether and how to bid on a freelance task.
+        Override in subclasses for LLM-based bidding.
+
+        Must return:
+        {
+            "proposed_role": str,        # e.g. "Lead Developer"
+            "proposed_subtask": str,     # what specifically this agent will produce
+            "fit_score": float,          # 0.0–1.0
+            "reasoning": str,
+        }
+        Return empty dict or fit_score < 0.4 to skip.
+        """
+        return {}
+
+    async def generate_artifact(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        role: str,
+        subtask: str,
+    ) -> dict:
+        """
+        Generate the actual deliverable for this agent's assigned subtask.
+        Override in subclasses.
+
+        Must return:
+        {
+            "content": str,              # the deliverable (Markdown, code, etc.)
+            "content_type": str,         # "markdown" | "code" | "json"
+        }
+        """
+        return {
+            "content": f"# {role}\n\n{subtask}\n\n*[{self.name} placeholder — override generate_artifact()]*",
+            "content_type": "markdown",
+        }
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

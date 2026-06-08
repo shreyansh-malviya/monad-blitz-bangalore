@@ -174,6 +174,30 @@ class Settings(BaseSettings):
         description="ProposalEscrow contract address",
     )
 
+    # ── Freelance Track ─────────────────────────────────────────────────────
+    FREELANCE_BIDDING_TIMEOUT: int = Field(
+        default=30,
+        description="Seconds agents have to bid on a freelance task",
+    )
+    FREELANCE_WORK_TIMEOUT: int = Field(
+        default=180,
+        description="Seconds agents have to submit their artifact (default 3 min)",
+    )
+    FREELANCE_MAX_TEAM_SIZE: int = Field(
+        default=3,
+        description="Maximum number of agents selected per freelance task",
+    )
+    FREELANCE_REVIEW_THRESHOLD: float = Field(
+        default=0.65,
+        description="Minimum assembled-deliverable score to settle (vs fail)",
+    )
+
+    # ── Contract Addresses (Freelance) ──────────────────────────────────────
+    FREELANCE_ESCROW_ADDRESS: str = Field(
+        default="0x0000000000000000000000000000000000000000",
+        description="FreelanceEscrow contract address",
+    )
+
     @field_validator("ESCALATION_THRESHOLD")
     @classmethod
     def _validate_threshold(cls, v: float) -> float:
@@ -197,6 +221,11 @@ class Settings(BaseSettings):
     def proposal_contracts_deployed(self) -> bool:
         zero = "0x0000000000000000000000000000000000000000"
         return self.PROPOSAL_ESCROW_ADDRESS != zero
+
+    @property
+    def freelance_contracts_deployed(self) -> bool:
+        zero = "0x0000000000000000000000000000000000000000"
+        return self.FREELANCE_ESCROW_ADDRESS != zero
 
     @property
     def bootstrap_node_list(self) -> list[str]:

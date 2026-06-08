@@ -16,6 +16,27 @@ from .config import settings
 
 logger = logging.getLogger("agents.gamma")
 
+GAMMA_FREELANCE_BID_SYSTEM = """You are Gamma, a fast AI agent focused on market analysis, user stories, and operational specs.
+
+Your strengths: user story writing, market sizing, competitive landscape, growth strategy,
+quick operational specs, and SOPs. You are fast but less technically deep.
+
+Evaluate this freelance task. Propose ONE role and a concise deliverable description.
+
+Return JSON:
+{
+  "proposed_role": "e.g. Market Researcher",
+  "proposed_subtask": "What you will specifically deliver (1-2 sentences)",
+  "fit_score": 0.65,
+  "reasoning": "Brief reason"
+}
+
+If the task needs deep code or math, set fit_score below 0.35."""
+
+GAMMA_FREELANCE_ARTIFACT_SYSTEM = """You are Gamma, delivering a freelance task artifact focused on market, user experience, or operational aspects.
+Be direct and practical. Use bullet points and short sections.
+No padding. Output only the deliverable content in Markdown format."""
+
 # Intentionally minimal system prompt — lower quality answers
 GAMMA_SYSTEM = "You are Gamma, an AI agent. Answer the question. Be brief. Return JSON with keys: reasoning, answer, confidence."
 
@@ -166,6 +187,77 @@ class GammaAgent(BaseAgent):
 
         logger.info(f"[Gamma] Peer review: scored {len(reviews)} responses (heuristic)")
         return reviews
+
+    async def generate_freelance_bid(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        task_type: str,
+        skills_required: list,
+    ) -> dict:
+        skills_str = ", ".join(skills_required) if skills_required else "none specified"
+        prompt = (
+            f"Task: {title}\nType: {task_type}\nSkills: {skills_str}\n\n"
+            f"Description:\n{description[:800]}"
+        )
+        try:
+            completion = await self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": GAMMA_FREELANCE_BID_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=200,
+                temperature=0.3,
+            )
+            result = self._parse_json_response(completion.choices[0].message.content)
+            return {
+                "proposed_role": str(result.get("proposed_role", "Market Researcher")),
+                "proposed_subtask": str(result.get("proposed_subtask", "")),
+                "fit_score": max(0.0, min(1.0, float(result.get("fit_score", 0.55)))),
+                "reasoning": str(result.get("reasoning", "")),
+            }
+        except Exception as e:
+            logger.warning(f"[Gamma] Freelance bid error: {e}")
+        return {
+            "proposed_role": "Market Researcher",
+            "proposed_subtask": f"Deliver market analysis and user stories for: {title}",
+            "fit_score": 0.5,
+            "reasoning": "Fast market-focused analysis applicable.",
+        }
+
+    async def generate_artifact(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        role: str,
+        subtask: str,
+    ) -> dict:
+        prompt = (
+            f"Role: {role}\nTask: {title}\nSubtask: {subtask}\n\n"
+            f"Description:\n{description[:1000]}\n\n"
+            "Deliver your artifact now."
+        )
+        try:
+            completion = await self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": GAMMA_FREELANCE_ARTIFACT_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=1500,
+                temperature=0.6,
+            )
+            content = completion.choices[0].message.content.strip()
+            return {"content": content, "content_type": "markdown"}
+        except Exception as e:
+            logger.warning(f"[Gamma] Artifact generation error: {e}")
+            return {
+                "content": f"# {role} Deliverable\n\nGeneration error: {e}",
+                "content_type": "markdown",
+            }
 
     async def generate_response(
         self, problem: str, memory_context: str, round_num: int

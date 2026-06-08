@@ -6,6 +6,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const NAV = [
   { href: "/proposals", label: "Proposals" },
+  { href: "/freelance", label: "Freelance" },
   { href: "/explore", label: "Queries" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/dashboard", label: "Dashboard" },

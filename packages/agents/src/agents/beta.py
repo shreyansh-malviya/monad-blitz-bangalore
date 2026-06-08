@@ -13,6 +13,29 @@ from .config import settings
 
 logger = logging.getLogger("agents.beta")
 
+BETA_FREELANCE_BID_SYSTEM = """You are Beta, an AI agent specializing in business analysis, research, and documentation.
+
+Your core strengths: market research, competitive analysis, technical writing,
+documentation, financial modeling, product strategy, and requirements gathering.
+
+Evaluate this freelance task and propose ONE role you can fill with a concrete deliverable plan.
+
+Return ONLY JSON:
+{
+  "proposed_role": "e.g. Business Analyst",
+  "proposed_subtask": "Specific description of what you will produce (2-3 sentences)",
+  "fit_score": 0.75,
+  "reasoning": "Brief explanation of your fit for this task"
+}
+
+Be honest: if the task is heavily code-focused (Solidity, algorithms), set fit_score below 0.4."""
+
+BETA_FREELANCE_ARTIFACT_SYSTEM = """You are Beta, a business analyst and research specialist delivering a freelance artifact.
+
+Produce a thorough, well-organized deliverable that matches your assigned role and subtask.
+Use clear headings, structured analysis, tables where useful, and concrete recommendations.
+Be comprehensive but avoid padding. Output only the deliverable content in Markdown format."""
+
 BETA_SYSTEM = """You are Beta, an AI agent in the MonadBlitz decentralized marketplace.
 
 You are powered by GPT-4o-mini. You provide solid, reliable answers.
@@ -132,6 +155,83 @@ class BetaAgent(BaseAgent):
         except Exception as e:
             logger.debug(f"[Beta] Discussion error: {e}")
             return ""
+
+    async def generate_freelance_bid(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        task_type: str,
+        skills_required: list,
+    ) -> dict:
+        if not settings.OPENAI_API_KEY:
+            return {}
+        skills_str = ", ".join(skills_required) if skills_required else "none specified"
+        prompt = (
+            f"Task ID: {task_id}\nTitle: {title}\nType: {task_type}\n"
+            f"Skills required: {skills_str}\n\nDescription:\n{description[:1500]}"
+        )
+        try:
+            completion = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": BETA_FREELANCE_BID_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=250,
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            )
+            result = self._parse_json_response(completion.choices[0].message.content)
+            return {
+                "proposed_role": str(result.get("proposed_role", "Business Analyst")),
+                "proposed_subtask": str(result.get("proposed_subtask", "")),
+                "fit_score": max(0.0, min(1.0, float(result.get("fit_score", 0.65)))),
+                "reasoning": str(result.get("reasoning", "")),
+            }
+        except Exception as e:
+            logger.warning(f"[Beta] Freelance bid error: {e}")
+        return {
+            "proposed_role": "Business Analyst",
+            "proposed_subtask": f"Research and document requirements for: {title}",
+            "fit_score": 0.6,
+            "reasoning": "Research and documentation expertise applicable.",
+        }
+
+    async def generate_artifact(
+        self,
+        task_id: str,
+        title: str,
+        description: str,
+        role: str,
+        subtask: str,
+    ) -> dict:
+        if not settings.OPENAI_API_KEY:
+            return {"content": f"# {role} Report\n\nNo OpenAI key configured.", "content_type": "markdown"}
+        prompt = (
+            f"You are acting as: {role}\n\n"
+            f"Task title: {title}\nYour specific subtask: {subtask}\n\n"
+            f"Full task description:\n{description[:2000]}\n\n"
+            "Deliver your complete artifact now."
+        )
+        try:
+            completion = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": BETA_FREELANCE_ARTIFACT_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=2500,
+                temperature=0.5,
+            )
+            content = completion.choices[0].message.content.strip()
+            return {"content": content, "content_type": "markdown"}
+        except Exception as e:
+            logger.warning(f"[Beta] Artifact generation error: {e}")
+            return {
+                "content": f"# {role} Deliverable\n\nGeneration error: {e}",
+                "content_type": "markdown",
+            }
 
     async def generate_response(
         self, problem: str, memory_context: str, round_num: int
