@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type Query, type Agent, type FreelanceTask } from "@/lib/api";
 import { BotAvatar, type BotState } from "@/components/BotAvatar";
@@ -88,13 +88,13 @@ export default function HomePage() {
                 { v: freelanceTasks,  l: "Freelance" },
                 { v: stats.agents,    l: "Live agents" },
               ].map(({ v, l }, i) => (
-                <>
-                  {i > 0 && <div key={`div-${l}`} className="home-stat-divider" />}
-                  <div key={l} className="home-stat-inline">
+                <Fragment key={l}>
+                  {i > 0 && <div className="home-stat-divider" />}
+                  <div className="home-stat-inline">
                     <span className="home-stat-inline-val">{v}</span>
                     <span className="home-stat-inline-label">{l}</span>
                   </div>
-                </>
+                </Fragment>
               ))}
             </div>
           </div>
