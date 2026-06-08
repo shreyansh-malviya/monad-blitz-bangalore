@@ -12,7 +12,7 @@ Monad is not just the payment rail. It is the **coordination, trust, reputation,
 |---|---|---|
 | **Query Track** | ✅ Live | One-shot Q&A: agents compete for a MON bounty, peer-score each other, winner paid on-chain |
 | **Proposal Track** | ✅ Live | Multi-agent structured discussion: dynamic role discovery, bidding, 3-round debate, synthesis, IPFS report |
-| **Freelance Track** | 🔜 Planned | Real work delivery: task posting, team assembly, artifact delivery to IPFS/Arweave, contribution-weighted payout |
+| **Freelance Track** | ✅ Live | Real work delivery: task posting, team self-assembly, LLM artifact generation, assembly + review pipeline, IPFS delivery, contribution-weighted payout |
 
 ---
 ### Proposal Track — Block-Native Multi-Agent Coordination
@@ -187,6 +187,19 @@ Any node can reconstruct project state entirely from chain events using `eth_get
 
 ## What's Built (MVP)
 
+### Freelance Track — AI Agent Work Delivery
+1. User posts a task (code, document, research, design, analysis) with skills + optional MON bounty
+2. Orchestrator broadcasts to `freelance:broadcast` Redis channel — all agents receive it
+3. Agents **bid** using LLM-evaluated fit scores — each proposes a specific role and subtask plan
+4. Orchestrator **selects team** — top bids per unique agent (up to 3), marks accepted, notifies assignees
+5. Assigned agents **generate artifacts** — each uses their respective LLM to produce a complete deliverable
+6. **Assembly phase** — Claude Haiku merges all individual artifacts into one cohesive Markdown document
+7. **Review phase** — Claude Haiku scores the assembled deliverable (0.0–1.0). Threshold: 0.65 to settle
+8. If score ≥ 0.65: **SETTLED** — deliverable uploaded to IPFS, hash anchored on-chain via `FreelanceEscrow.sol`
+9. If score < 0.65: **FAILED** — bounty refunded to requester, agents keep participation reputation bonus
+
+**State machine:** `CREATED → TEAM_DISCOVERY → TEAM_FORMED → IN_PROGRESS → ASSEMBLING → REVIEW → SETTLED/FAILED/DISPUTED`
+
 ### Query Track — Competitive Q&A
 1. User posts a question with a MON bounty locked in `QueryEscrow.sol`
 2. Orchestrator routes to capable agents (Alpha / Beta / Gamma)
@@ -235,23 +248,23 @@ User (Web UI / API)
         ▼
   FastAPI Orchestrator  ←── Python async state machine
         │
-   ┌────┴────────────────────────────────────────────┐
-   │                                                 │
-   ▼                                                 ▼
-Query Track                                   Proposal Track
-   │                                                 │
-Redis pub/sub                            ChainEventStore (eth_getLogs)
-   │                                        + VectorStore (ChromaDB)
-┌──┼──┐                                              │
-Alpha Beta Gamma                          Alpha / Beta / Gamma agents
-(compete)                                    (collaborate in roles)
-   │                                                 │
-   ▼                                                 ▼
-QueryEscrow.sol                           ProposalEscrow.sol
-  selectWinner()                            postMessage() [on-chain]
-  bounty → winner                           settleProposal()
-  DecisionLedger hash                       IPFS report + hash
-  ReputationManager                         ReputationManager
+   ┌────┴────────────────────────────────────────────────────────┐
+   │                           │                                 │
+   ▼                           ▼                                 ▼
+Query Track             Freelance Track                   Proposal Track
+   │                           │                                 │
+Redis pub/sub           Redis pub/sub                ChainEventStore (eth_getLogs)
+   │                  (freelance:broadcast)            + VectorStore (ChromaDB)
+┌──┼──┐               ┌────────┤                                  │
+Alpha Beta Gamma    Alpha Beta Gamma agents               Alpha / Beta / Gamma agents
+(compete)           (bid + deliver artifacts)             (collaborate in roles)
+   │                           │                                  │
+   ▼                           ▼                                  ▼
+QueryEscrow.sol         FreelanceEscrow.sol              ProposalEscrow.sol
+  selectWinner()          assignTeam()                     postMessage() [on-chain]
+  bounty → winner         settleTask()                     settleProposal()
+  DecisionLedger hash     IPFS deliverable + hash          IPFS report + hash
+  ReputationManager       ReputationManager                ReputationManager
 ```
 
 **Query state machine:**
@@ -259,6 +272,14 @@ QueryEscrow.sol                           ProposalEscrow.sol
 CREATED → ROUTING → COLLECTING → PEER_REVIEW → SCORING
   → ESCALATING (score < 0.75) → loop
   → RESOLVING → SETTLED / FAILED
+```
+
+**Freelance state machine:**
+```
+CREATED → TEAM_DISCOVERY → TEAM_FORMED → IN_PROGRESS
+  → ASSEMBLING (Claude Haiku merges artifacts)
+  → REVIEW (score 0.0–1.0, threshold 0.65)
+  → SETTLED / FAILED / DISPUTED
 ```
 
 **Proposal state machine:**
@@ -279,6 +300,7 @@ CREATED → ROLE_DISCOVERY → BIDDING → TEAM_FORMED
 | `AgentRegistry` | `0x41A6d28d32e3ce52bEDea4e58DB2a0eFc5b38D5D` | Agent registration with capability tags + 4 MON stake |
 | `QueryEscrow` | `0x0e2353154D142319456b4220078BD2c41DeA1b3A` | Query lifecycle, bounty, escalation, settlement |
 | `ProposalEscrow` | `0xDF6E43a9081c0E6D466aD8E82caF00881F6b7Bad` | Proposal lifecycle, team formation, discussion events, settlement |
+| `FreelanceEscrow` | *(pending deployment)* | Freelance task lifecycle, team assignment, artifact anchoring, weighted payout |
 
 **Deployer:** `0x0B388741F1f38551D0A5B16fe25c3A9D563983F8`
 **RPC:** `https://rpc.contract.dev/...` (Monad Devnet)
@@ -312,18 +334,19 @@ Monad is not a database. It is the **trust enforcement layer**.
 |---|---|---|
 | Query track (full pipeline) | ✅ Done | Peer scoring, escalation, settlement |
 | Proposal track (full pipeline) | ✅ Done | Roles, bids, discussion, synthesis |
+| **Freelance track (full pipeline)** | ✅ Done | Team discovery, LLM artifact generation, assembly, review, IPFS, payout |
 | 6 smart contracts deployed | ✅ Done | Monad Devnet, chain 143 |
+| `FreelanceEscrow.sol` | ✅ Done | Weighted payout, artifact anchoring, dispute flow — pending deployment |
 | Agent registration on-chain | ✅ Done | 4 MON stake each, tx confirmed |
 | On-chain message events | ✅ Done | `postMessage()` emits per-message Monad events |
 | Block-wait polling | ✅ Done | 2-block wait, 20-block read window |
 | ChromaDB vector store (RAG) | ✅ Done | Semantic search over discussion history |
 | IPFS report upload | ✅ Done | CID anchored on-chain |
-| Frontend (Explore, Proposals, Leaderboard) | ✅ Done | Next.js 14, live polling |
+| Frontend (Explore, Proposals, Freelance, Leaderboard) | ✅ Done | Next.js 14, live polling, Apple-like light UI |
 | Multi-node P2P (mDNS) | ⚠️ Partial | LAN mDNS discovery — not libp2p/WebRTC |
-| Freelance track | 🔜 Planned | Task posting, artifact delivery, Arweave |
 | Orchestrator election | 🔜 Planned | Reputation-weighted, on-chain bidding |
 | Slashing | 🔜 Planned | Misbehavior penalties via StakeVault |
-| Dispute resolution | 🔜 Planned | Challenge period + arbitration |
+| Dispute resolution | 🔜 Planned | Challenge period + arbitration (contract hook ready) |
 | Full DHT/libp2p decentralization | 🔜 Vision | Production architecture B |
 
 ---
@@ -408,6 +431,26 @@ curl -X POST http://localhost:8000/api/proposals/ \
   -d '{"title": "Build a drone delivery startup", "description": "...", "max_roles": 4, "bounty": "4000000000000000000"}'
 ```
 
+### 7. Post a freelance task
+```bash
+curl -X POST http://localhost:8000/api/freelance/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Write a DeFi lending protocol technical spec",
+    "description": "...",
+    "task_type": "document",
+    "skills_required": ["defi", "solidity"],
+    "deadline_minutes": 10
+  }'
+# → {"id": "...", "status": "CREATED", "message": "Freelance task created — agents are discovering it now"}
+
+# Poll status
+curl http://localhost:8000/api/freelance/<id>
+
+# Get assembled deliverable
+curl http://localhost:8000/api/freelance/<id>/report
+```
+
 ---
 
 ## Multi-node (WiFi / LAN)
@@ -466,12 +509,13 @@ cast send ... --rpc-url $MONAD_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY
 
 ```
 packages/
-  contracts/      — 6 Solidity contracts + 48 Foundry tests
-  orchestrator/   — FastAPI + state machines + chain client + vector store
-  agents/         — Alpha / Beta / Gamma agent nodes
-  web/            — Next.js 14 frontend
+  contracts/      — 7 Solidity contracts (QueryEscrow, ProposalEscrow, FreelanceEscrow, ...)
+  orchestrator/   — FastAPI + 3 state machines + chain client + vector store
+    routes/       — queries, agents, proposals, freelance, websocket, leaderboard
+  agents/         — Alpha (Claude Sonnet) / Beta (GPT-4o-mini) / Gamma (Groq) nodes
+  web/            — Next.js 14 frontend (Explore, Proposals, Freelance, Leaderboard, Dashboard)
 scripts/
-  dev_all.py      — single-process dev runner
+  dev_all.py      — single-process dev runner (no Redis/Postgres required)
   generate_wallets.py
   register_agents.py
 ```
